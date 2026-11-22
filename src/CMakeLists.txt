@@ -78,6 +78,7 @@ idf_component_register(SRCS
                     "${BRUCE_BLUETOOTH_BACKEND_SRC}"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/cellular/cellular.c"
+                    "core/cellular/cmux.c"
                     "core/clock/clock.c"
                     "core/compress/compress.c"
                     "core/config/config.c"

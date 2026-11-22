@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "core/clock/clock.h"
 #include "core/config/config.h"
 #include "core/device/device.h"
 #include "core/process/process.h"
@@ -26,6 +27,14 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "freertos/stream_buffer.h"
+
+#include "cmux.h"
+#include "core/network/network.h"
+#include "core/wifi/wifi_common.h"
+#include "esp_netif.h"
+#include "esp_netif_net_stack.h"
+#include "netif/ppp/ppp.h"
 
 #define TAG "cellular"
 #endif
@@ -572,6 +581,32 @@ static uint32_t s_sleep_sequence;
 static volatile bool s_after_sleep;
 static char s_line[CELLULAR__LINE_MAX];
 static size_t s_line_length;
+/* The modem's session ends and starts again, e.g. after a failed CMUX start. */
+static bool s_restart;
+
+/* With mobile data the UART runs CMUX: AT commands on DLC 1, PPP on DLC 2,
+ * split by s_mux_task. */
+#define CELLULAR__DLC_AT 1
+#define CELLULAR__DLC_DATA 2
+static volatile bool s_mux;
+static volatile bool s_mux_run;
+static TaskHandle_t s_mux_task;
+static StreamBufferHandle_t s_at_stream;
+static StreamBufferHandle_t s_dial_stream; /* DLC 2 before CONNECT. */
+static SemaphoreHandle_t s_tx_lock;
+static volatile uint8_t s_mux_reply[3]; /* UA or DM per DLC, 0 before one came. */
+static volatile bool s_ppp_input;
+
+static bool s_data_enabled;
+static bool s_data_failed;
+static bool s_data_running;   /* PPP started. */
+static bool s_data_connected; /* PPP up with an address. */
+static bool s_data_redial;    /* The APN changed. */
+static uint64_t s_data_started_ms;
+static uint64_t s_data_retry_ms;
+static char s_apn[BRUCE_CELLULAR_APN_MAX];
+static esp_netif_t *s_ppp;
+static esp_netif_dns_info_t s_ppp_dns[2]; /* From the network when the link came up. */
 
 static uint64_t cellular__now(void) { return (uint64_t)(esp_timer_get_time() / 1000); }
 
@@ -600,13 +635,44 @@ void cellular__power_off(void) {
     cellular__audio(false);
 }
 
+static bool cellular__read_byte(uint8_t *c, uint32_t timeout_ms) {
+    if (s_mux) return xStreamBufferReceive(s_at_stream, c, 1, pdMS_TO_TICKS(timeout_ms)) == 1;
+    return uart_read_bytes(CELLULAR__PORT, c, 1, pdMS_TO_TICKS(timeout_ms)) == 1;
+}
+
+static void cellular__mux_send(uint8_t dlci, uint8_t control, const void *data, size_t length) {
+    static uint8_t s_frame[CMUX_FRAME_MAX];
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    size_t size = cmux__frame(dlci, control, data, length, s_frame);
+    uart_write_bytes(CELLULAR__PORT, s_frame, size);
+    xSemaphoreGive(s_tx_lock);
+}
+
+static void cellular__mux_write(uint8_t dlci, const void *data, size_t length) {
+    const uint8_t *bytes = data;
+    while (length > 0) {
+        size_t part = length < CMUX_DATA_MAX ? length : CMUX_DATA_MAX;
+        cellular__mux_send(dlci, CMUX_UIH, bytes, part);
+        bytes += part;
+        length -= part;
+    }
+}
+
+static void cellular__send(const void *data, size_t length) {
+    if (s_mux) {
+        cellular__mux_write(CELLULAR__DLC_AT, data, length);
+    } else {
+        uart_write_bytes(CELLULAR__PORT, data, length);
+    }
+}
+
 static bool cellular__read_line(char *out, size_t capacity, uint32_t timeout_ms) {
     uint64_t deadline = cellular__now() + timeout_ms;
     for (;;) {
         uint8_t c;
         uint64_t now = cellular__now();
         uint32_t wait = now < deadline ? (uint32_t)(deadline - now) : 0;
-        if (uart_read_bytes(CELLULAR__PORT, &c, 1, pdMS_TO_TICKS(wait)) != 1) return false;
+        if (!cellular__read_byte(&c, wait)) return false;
         if (c == '\r') continue;
         if (c == '\n') {
             if (s_line_length == 0) continue;
@@ -645,8 +711,8 @@ static cellular_line_t cellular__handle_line(const char *line) {
 }
 
 static void cellular__write(const char *command) {
-    uart_write_bytes(CELLULAR__PORT, command, strlen(command));
-    uart_write_bytes(CELLULAR__PORT, "\r", 1);
+    cellular__send(command, strlen(command));
+    cellular__send("\r", 1);
 }
 
 /* Reads lines until a final result. */
@@ -676,7 +742,7 @@ static bool cellular__open(void) {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    if (uart_driver_install(CELLULAR__PORT, 2048, 0, 0, NULL, 0) != ESP_OK) return false;
+    if (uart_driver_install(CELLULAR__PORT, 4096, 0, 0, NULL, 0) != ESP_OK) return false;
     if (uart_param_config(CELLULAR__PORT, &config) != ESP_OK ||
         uart_set_pin(CELLULAR__PORT, CONFIG_BRUCE_CELLULAR_TX_GPIO, CONFIG_BRUCE_CELLULAR_RX_GPIO, -1, -1) !=
             ESP_OK) {
@@ -693,6 +759,12 @@ static bool cellular__power_on(void) {
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN, true);
     s_powered = true;
     vTaskDelay(pdMS_TO_TICKS(1500));
+    if (cellular__command("AT", 1500)) return true;
+    /* Still on in CMUX mode from before a restart: close the multiplexer. */
+    static const uint8_t close_down[] = {CMUX_FLAG, 0x03, CMUX_UIH, 0x05, 0xC3, 0x01, 0xF2, CMUX_FLAG};
+    uart_write_bytes(CELLULAR__PORT, close_down, sizeof(close_down));
+    vTaskDelay(pdMS_TO_TICKS(500));
+    uart_flush_input(CELLULAR__PORT);
     if (cellular__command("AT", 1500)) return true;
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -871,7 +943,7 @@ static bool cellular__wait_prompt(uint32_t timeout_ms) {
     uint64_t deadline = cellular__now() + timeout_ms;
     for (uint64_t now = cellular__now(); now < deadline; now = cellular__now()) {
         uint8_t c;
-        if (uart_read_bytes(CELLULAR__PORT, &c, 1, pdMS_TO_TICKS(deadline - now)) != 1) return false;
+        if (!cellular__read_byte(&c, (uint32_t)(deadline - now))) return false;
         if (c == '>' && s_line_length == 0) return true;
         if (c == '\r') continue;
         if (c != '\n') {
@@ -898,13 +970,13 @@ static void cellular__sms_send_request(cellular__request_t *request) {
     snprintf(command, sizeof(command), "AT+CMGS=\"%s\"", request->command);
     cellular__write(command);
     if (!cellular__wait_prompt(5000)) {
-        uart_write_bytes(CELLULAR__PORT, "\x1B", 1); /* ESC cancels. */
+        cellular__send("\x1B", 1); /* ESC cancels. */
         cellular__finish(2000);
         return;
     }
     const char *body = ascii ? request->text : s_hex;
-    uart_write_bytes(CELLULAR__PORT, body, strlen(body));
-    uart_write_bytes(CELLULAR__PORT, "\x1A", 1); /* Ctrl-Z sends. */
+    cellular__send(body, strlen(body));
+    cellular__send("\x1A", 1); /* Ctrl-Z sends. */
     if (cellular__finish(60000)) request->result = BRUCE_OK;
 }
 
@@ -936,7 +1008,11 @@ static void cellular__sms_arrived(void) {
 static void cellular__resync(void) {
     if (!s_after_sleep) return;
     s_after_sleep = false;
-    uart_flush_input(CELLULAR__PORT);
+    if (s_mux) {
+        (void)xStreamBufferReset(s_at_stream);
+    } else {
+        uart_flush_input(CELLULAR__PORT);
+    }
     s_line_length = 0;
     if (!cellular__poll_call()) {
         ESP_LOGW(TAG, "modem did not answer AT+CLCC after sleep");
@@ -964,6 +1040,263 @@ static void cellular__run_request(cellular__request_t *request) {
         request->result = cellular__command(request->command, request->timeout_ms) ? BRUCE_OK : BRUCE_ERR_IO;
     }
     xSemaphoreGive(request->done);
+}
+
+/* ---- Mobile data: CMUX and PPP ---- */
+
+static void cellular__mux_frame(const cmux_frame_t *frame) {
+    if ((frame->control == CMUX_UA || frame->control == CMUX_DM) && frame->dlci < 3) {
+        s_mux_reply[frame->dlci] = frame->control;
+    } else if (frame->control != CMUX_UIH && frame->control != 0x03) {
+        return;
+    } else if (frame->dlci == CELLULAR__DLC_AT) {
+        (void)xStreamBufferSend(s_at_stream, frame->data, frame->length, 0);
+    } else if (frame->dlci == CELLULAR__DLC_DATA) {
+        if (s_ppp_input) {
+            (void)esp_netif_receive(s_ppp, (void *)frame->data, frame->length, NULL);
+            return;
+        }
+        (void)xStreamBufferSend(s_dial_stream, frame->data, frame->length, 0);
+    } else if (frame->dlci == 0 && frame->length >= 2 && (frame->data[0] & 0x02) && frame->length <= 16) {
+        /* A control command such as MSC: answer it with the same message as a response. */
+        uint8_t reply[16];
+        memcpy(reply, frame->data, frame->length);
+        reply[0] &= (uint8_t)~0x02;
+        cellular__mux_send(0, CMUX_UIH, reply, frame->length);
+    }
+}
+
+static void cellular__mux_task(void *context) {
+    (void)context;
+    static cmux_parser_t s_parser;
+    uint8_t bytes[256];
+    cmux__reset(&s_parser);
+    while (s_mux_run) {
+        int count = uart_read_bytes(CELLULAR__PORT, bytes, sizeof(bytes), pdMS_TO_TICKS(20));
+        for (int i = 0; i < count; ++i) {
+            cmux_frame_t frame;
+            if (cmux__feed(&s_parser, bytes[i], &frame)) cellular__mux_frame(&frame);
+        }
+    }
+    s_mux_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void cellular__mux_stop(void) {
+    if (!s_mux) return;
+    s_mux_run = false;
+    while (s_mux_task != NULL) vTaskDelay(1);
+    s_mux = false;
+    s_line_length = 0;
+}
+
+/* Opens DLC `dlci` and waits for the modem's UA. */
+static bool cellular__mux_open(uint8_t dlci) {
+    s_mux_reply[dlci] = 0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        cellular__mux_send(dlci, CMUX_SABM | CMUX_PF, NULL, 0);
+        for (int wait = 0; wait < 100 && s_mux_reply[dlci] == 0; ++wait) vTaskDelay(pdMS_TO_TICKS(10));
+        if (s_mux_reply[dlci] != 0) return s_mux_reply[dlci] == CMUX_UA;
+    }
+    return false;
+}
+
+static bool cellular__mux_start(void) {
+    if (s_at_stream == NULL) {
+        s_at_stream = xStreamBufferCreate(1024, 1);
+        s_dial_stream = xStreamBufferCreate(256, 1);
+        s_tx_lock = xSemaphoreCreateMutex();
+        if (s_at_stream == NULL || s_dial_stream == NULL || s_tx_lock == NULL) return false;
+    }
+    if (!cellular__command("AT+CMUX=0", 3000)) return false;
+    (void)xStreamBufferReset(s_at_stream);
+    s_line_length = 0;
+    s_mux = s_mux_run = true;
+    bool opened = xTaskCreate(cellular__mux_task, "cellular_mux", 4096, NULL, 6, &s_mux_task) == pdPASS;
+    if (!opened) s_mux = s_mux_run = false;
+    for (uint8_t dlci = 0; opened && dlci <= CELLULAR__DLC_DATA; ++dlci) opened = cellular__mux_open(dlci);
+    if (opened) {
+        /* Each virtual port is its own AT channel; URCs go to the one Core reads. */
+        cellular__setup();
+        cellular__command("AT+CATR=4", 2000);
+        ESP_LOGW(TAG, "CMUX started");
+        return true;
+    }
+    ESP_LOGW(TAG, "the modem did not open its CMUX channels");
+    if (s_mux) {
+        static const uint8_t close_down[] = {0xC3, 0x01};
+        cellular__mux_send(0, CMUX_UIH, close_down, sizeof(close_down));
+        cellular__mux_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        uart_flush_input(CELLULAR__PORT);
+        if (!cellular__command("AT", 1500)) s_restart = true;
+    }
+    return false;
+}
+
+static esp_err_t cellular__ppp_transmit(void *handle, void *buffer, size_t length) {
+    (void)handle;
+    if (!s_mux) return ESP_FAIL;
+    cellular__mux_write(CELLULAR__DLC_DATA, buffer, length);
+    return ESP_OK;
+}
+
+static esp_err_t cellular__ppp_attach(esp_netif_t *netif, void *args) {
+    esp_netif_driver_base_t *driver = args;
+    driver->netif = netif;
+    const esp_netif_driver_ifconfig_t config = {.handle = driver, .transmit = cellular__ppp_transmit};
+    return esp_netif_set_driver_config(netif, &config);
+}
+
+static bool cellular__ppp_create(void) {
+    static esp_netif_driver_base_t s_driver = {.post_attach = cellular__ppp_attach};
+    if (s_ppp != NULL) return true;
+    if (network__init() != BRUCE_OK) return false;
+    esp_netif_config_t config = ESP_NETIF_DEFAULT_PPP();
+    s_ppp = esp_netif_new(&config);
+    if (s_ppp == NULL) return false;
+    if (esp_netif_attach(s_ppp, &s_driver) != ESP_OK) {
+        esp_netif_destroy(s_ppp);
+        s_ppp = NULL;
+        return false;
+    }
+    return true;
+}
+
+static uint8_t cellular__ppp_phase(void) {
+    struct netif *netif = s_ppp != NULL ? esp_netif_get_netif_impl(s_ppp) : NULL;
+    const ppp_pcb *pcb = netif != NULL ? netif->state : NULL;
+    return pcb != NULL ? pcb->phase : PPP_PHASE_DEAD;
+}
+
+/* Sends `command` on DLC 2 and logs each line back until a final result;
+ * returns that result, or "" after timeout_ms. */
+static const char *cellular__data_command(const char *command, uint32_t timeout_ms) {
+    static char s_reply[64];
+    (void)xStreamBufferReset(s_dial_stream);
+    cellular__mux_write(CELLULAR__DLC_DATA, command, strlen(command));
+    cellular__mux_write(CELLULAR__DLC_DATA, "\r", 1);
+    size_t length = 0;
+    uint64_t deadline = cellular__now() + timeout_ms;
+    for (uint64_t now = cellular__now(); now < deadline; now = cellular__now()) {
+        uint8_t c;
+        if (xStreamBufferReceive(s_dial_stream, &c, 1, pdMS_TO_TICKS(deadline - now)) != 1) break;
+        if (c != '\r' && c != '\n') {
+            if (length + 1 < sizeof(s_reply)) s_reply[length++] = (char)c;
+            continue;
+        }
+        if (length == 0) continue;
+        s_reply[length] = '\0';
+        length = 0;
+        ESP_LOGW(TAG, "DLC 2 %s: %s", command, s_reply);
+        if (strncmp(s_reply, "CONNECT", 7) == 0 || strcmp(s_reply, "OK") == 0 || strcmp(s_reply, "ERROR") == 0 ||
+            strcmp(s_reply, "NO CARRIER") == 0 || strcmp(s_reply, "BUSY") == 0 ||
+            strncmp(s_reply, "+CME ERROR", 10) == 0)
+            return s_reply;
+    }
+    ESP_LOGW(TAG, "DLC 2 %s: no final result in %u ms", command, (unsigned)timeout_ms);
+    return "";
+}
+
+/* Starts a packet data call on DLC 2; true on CONNECT. */
+static bool cellular__dial_data(void) {
+    if (s_apn[0] != '\0') {
+        char command[32 + BRUCE_CELLULAR_APN_MAX];
+        snprintf(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"", s_apn);
+        if (!cellular__command(command, 3000)) return false;
+    }
+    if (strcmp(cellular__data_command("AT", 3000), "OK") != 0) {
+        /* Still in data mode from the last link: +++ needs a second of silence on both sides. */
+        vTaskDelay(pdMS_TO_TICKS(1100));
+        cellular__mux_write(CELLULAR__DLC_DATA, "+++", 3);
+        vTaskDelay(pdMS_TO_TICKS(1100));
+        (void)cellular__data_command("ATH", 5000);
+        if (strcmp(cellular__data_command("AT", 3000), "OK") != 0) return false;
+    }
+    (void)cellular__data_command("AT+CGDCONT?", 3000);
+    return strncmp(cellular__data_command("ATD*99#", 20000), "CONNECT", 7) == 0;
+}
+
+static void cellular__data_stop(void) {
+    if (!s_data_running) return;
+    (void)esp_netif_action_stop(s_ppp, NULL, 0, NULL);
+    for (int wait = 0; wait < 100 && cellular__ppp_phase() != PPP_PHASE_DEAD; ++wait) vTaskDelay(pdMS_TO_TICKS(50));
+    s_ppp_input = false;
+    s_data_running = s_data_connected = false;
+    ESP_LOGW(TAG, "mobile data stopped");
+}
+
+/* esp-netif keeps a started Wi-Fi station as the default interface even
+ * while it is not connected, so pick it here: Wi-Fi when connected, else the
+ * data link, whose DNS servers come back since Wi-Fi's DHCP replaced them. */
+static void cellular__data_route(void) {
+    esp_netif_t *wifi = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t info;
+    bool use_wifi = wifi != NULL && wifi__is_connected_internal() && esp_netif_get_ip_info(wifi, &info) == ESP_OK &&
+                    info.ip.addr != 0;
+    esp_netif_t *route = use_wifi ? wifi : s_data_connected ? s_ppp : NULL;
+    if (route == NULL || esp_netif_get_default_netif() == route) return;
+    (void)esp_netif_set_default_netif(route);
+    if (route == s_ppp) {
+        (void)esp_netif_set_dns_info(s_ppp, ESP_NETIF_DNS_MAIN, &s_ppp_dns[0]);
+        (void)esp_netif_set_dns_info(s_ppp, ESP_NETIF_DNS_BACKUP, &s_ppp_dns[1]);
+    }
+    ESP_LOGW(TAG, "internet now goes over %s", route == s_ppp ? "mobile data" : "Wi-Fi");
+}
+
+/* Keeps the data link up while mobile data is on. Runs on the modem task. */
+static void cellular__data_step(void) {
+    if (s_ppp != NULL) cellular__data_route();
+    cellular__lock();
+    bool ready = cellular__model_state(&s_model) == BRUCE_CELLULAR_READY;
+    cellular__unlock();
+    bool want = s_data_enabled && !s_data_failed && ready;
+    uint64_t now = cellular__now();
+    if (s_data_running) {
+        uint8_t phase = cellular__ppp_phase();
+        if (phase == PPP_PHASE_RUNNING && !s_data_connected) {
+            (void)esp_netif_get_dns_info(s_ppp, ESP_NETIF_DNS_MAIN, &s_ppp_dns[0]);
+            (void)esp_netif_get_dns_info(s_ppp, ESP_NETIF_DNS_BACKUP, &s_ppp_dns[1]);
+            s_data_connected = true;
+            ESP_LOGW(TAG, "mobile data connected");
+            clock__notify_network_connected();
+        } else if (phase == PPP_PHASE_DEAD) {
+            ESP_LOGW(TAG, "mobile data link ended");
+            s_ppp_input = false;
+            s_data_running = s_data_connected = false;
+            s_data_retry_ms = now + 10000;
+            return;
+        } else if (!s_data_connected && now - s_data_started_ms > 60000) {
+            ESP_LOGW(TAG, "mobile data link did not come up");
+            cellular__data_stop();
+            s_data_retry_ms = now + 10000;
+            return;
+        }
+        /* A running link outlives a registration report in between; it ends by itself if the network goes. */
+        if (!s_data_enabled || s_data_redial) cellular__data_stop();
+        return;
+    }
+    s_data_redial = false;
+    if (!want || now < s_data_retry_ms) return;
+    if (!s_mux && !cellular__mux_start()) {
+        s_data_failed = true;
+        notification__push("Mobile data: the modem could not start it", BRUCE_NOTIFICATION_DURATION_MAX_MS);
+        return;
+    }
+    if (!cellular__ppp_create() || !cellular__dial_data()) {
+        s_data_retry_ms = cellular__now() + 30000;
+        return;
+    }
+    s_ppp_input = true;
+    (void)esp_netif_action_start(s_ppp, NULL, 0, NULL);
+    if (cellular__ppp_phase() == PPP_PHASE_DEAD) {
+        s_ppp_input = false;
+        s_data_retry_ms = cellular__now() + 30000;
+        return;
+    }
+    s_data_running = true;
+    s_data_started_ms = cellular__now();
+    ESP_LOGW(TAG, "mobile data dialled");
 }
 
 #define CELLULAR__STATUS_ICON_KEY "core.cellular"
@@ -1010,7 +1343,7 @@ static void cellular__session(void) {
     cellular__setup();
     uint64_t polled_at = cellular__now();
     char line[CELLULAR__LINE_MAX];
-    while (s_enabled) {
+    while (s_enabled && !s_restart) {
         cellular__request_t *request = NULL;
         if (xQueueReceive(s_requests, &request, 0) == pdTRUE) cellular__run_request(request);
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
@@ -1018,6 +1351,7 @@ static void cellular__session(void) {
         cellular__sms_arrived();
         cellular__resync();
         cellular__update_status_icon();
+        cellular__data_step();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
         if (now - polled_at >= (in_call ? CELLULAR__POLL_CALL_MS : CELLULAR__POLL_IDLE_MS)) {
@@ -1030,6 +1364,8 @@ static void cellular__session(void) {
         }
     }
     if (cellular__in_call()) cellular__command("AT+CHUP", 2000);
+    cellular__data_stop();
+    cellular__mux_stop();
 }
 
 static void cellular__fail_requests(void) {
@@ -1056,6 +1392,7 @@ static void cellular__task(void *context) {
             continue;
         }
         s_line_length = 0;
+        s_restart = false;
         cellular__session();
         uart_driver_delete(CELLULAR__PORT);
         cellular__power_off();
@@ -1093,6 +1430,8 @@ static bool cellular__ensure_task(void) {
 }
 
 void cellular__start(void) {
+    s_data_enabled = config__get_cellular_data();
+    config__get_cellular_apn(s_apn, sizeof(s_apn));
     if (!config__get_cellular_enabled()) return;
     s_enabled = true;
     if (cellular__ensure_task()) xTaskNotifyGive(s_task);
@@ -1138,6 +1477,65 @@ bruce_result_t cellular__get_status(bruce_cellular_status_t *out) {
     out->last_log_sequence = s_log_sequence;
     out->message_sequence = s_message_sequence;
     cellular__unlock();
+    return BRUCE_OK;
+}
+
+bool cellular__data_online(void) { return s_data_connected; }
+
+bool cellular__data_pending(void) {
+    return s_enabled && !s_failed && s_data_enabled && !s_data_failed && !s_data_connected;
+}
+
+bruce_result_t cellular__set_data(bool enabled) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (enabled != config__get_cellular_data()) (void)config__set_cellular_data(enabled);
+    s_data_enabled = enabled;
+    s_data_failed = false;
+    s_data_retry_ms = 0;
+    if (s_task != NULL) xTaskNotifyGive(s_task);
+    return BRUCE_OK;
+}
+
+bruce_result_t cellular__set_apn(const char *apn) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (apn == NULL || strlen(apn) >= BRUCE_CELLULAR_APN_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+    for (const char *c = apn; *c != '\0'; ++c) {
+        if (!isprint((unsigned char)*c) || *c == '"') return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = config__set_cellular_apn(apn);
+    cellular__lock();
+    snprintf(s_apn, sizeof(s_apn), "%s", apn);
+    cellular__unlock();
+    s_data_redial = true;
+    s_data_failed = false;
+    s_data_retry_ms = 0;
+    return result;
+}
+
+bruce_result_t cellular__get_data_status(bruce_cellular_data_status_t *out) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    out->enabled = s_data_enabled;
+    cellular__lock();
+    snprintf(out->apn, sizeof(out->apn), "%s", s_apn);
+    bool ready = s_enabled && s_alive && cellular__model_state(&s_model) == BRUCE_CELLULAR_READY;
+    cellular__unlock();
+    if (!s_data_enabled) {
+        out->state = BRUCE_CELLULAR_DATA_OFF;
+    } else if (s_data_failed) {
+        out->state = BRUCE_CELLULAR_DATA_FAILED;
+    } else if (s_data_connected) {
+        out->state = BRUCE_CELLULAR_DATA_CONNECTED;
+    } else {
+        out->state = ready ? BRUCE_CELLULAR_DATA_CONNECTING : BRUCE_CELLULAR_DATA_WAITING;
+    }
+    esp_netif_ip_info_t info;
+    if (s_data_connected && s_ppp != NULL && esp_netif_get_ip_info(s_ppp, &info) == ESP_OK)
+        snprintf(out->ip, sizeof(out->ip), IPSTR, IP2STR(&info.ip));
     return BRUCE_OK;
 }
 
@@ -1410,6 +1808,25 @@ bruce_result_t cellular__delete_message(uint16_t id) {
 bruce_result_t cellular__send_message(const char *number, const char *text) {
     (void)number;
     (void)text;
+    return cellular__unsupported();
+}
+
+bool cellular__data_online(void) { return false; }
+
+bool cellular__data_pending(void) { return false; }
+
+bruce_result_t cellular__set_data(bool enabled) {
+    (void)enabled;
+    return cellular__unsupported();
+}
+
+bruce_result_t cellular__set_apn(const char *apn) {
+    (void)apn;
+    return cellular__unsupported();
+}
+
+bruce_result_t cellular__get_data_status(bruce_cellular_data_status_t *out) {
+    (void)out;
     return cellular__unsupported();
 }
 

@@ -51,7 +51,7 @@ typedef struct {
 
 typedef union {
     max_align_t alignment;
-    unsigned char bytes[8192];
+    unsigned char bytes[12288];
 } ap_arena_storage_t;
 
 typedef struct {

@@ -8,6 +8,7 @@
 #include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/net.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -366,8 +367,8 @@ static bruce_result_t nc_app__exec_session(nc_app__transport_t *transport, const
 }
 
 static int nc_app__client(const char *host, uint16_t port, const nc_app__options_t *opts) {
-    if (!wifi__is_connected()) {
-        stdio__printf("nc: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("nc: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);
@@ -400,8 +401,8 @@ static int nc_app__client(const char *host, uint16_t port, const nc_app__options
 }
 
 static int nc_app__listener(uint16_t port, const nc_app__options_t *opts) {
-    if (!wifi__is_connected()) {
-        stdio__printf("nc: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("nc: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     bruce_tcp_id_t listener = BRUCE_TCP_ID_INVALID;
@@ -468,8 +469,8 @@ static int nc_app__listener(uint16_t port, const nc_app__options_t *opts) {
 }
 
 static int nc_app__udp_client(const char *host, uint16_t port, const nc_app__options_t *opts) {
-    if (!wifi__is_connected()) {
-        stdio__printf("nc: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("nc: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     bruce_udp_id_t socket = BRUCE_UDP_ID_INVALID;
@@ -501,8 +502,8 @@ static int nc_app__udp_client(const char *host, uint16_t port, const nc_app__opt
 }
 
 static int nc_app__udp_listener(uint16_t port, const nc_app__options_t *opts) {
-    if (!wifi__is_connected()) {
-        stdio__printf("nc: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("nc: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     bruce_udp_id_t socket = BRUCE_UDP_ID_INVALID;
@@ -542,8 +543,8 @@ static int nc_app__udp_listener(uint16_t port, const nc_app__options_t *opts) {
  * port-unreachable, and this SDK exposes neither raw ICMP nor a generic
  * "did anything answer" probe. */
 static int nc_app__scan(const char *host, uint16_t low, uint16_t high, const nc_app__options_t *opts) {
-    if (!wifi__is_connected()) {
-        stdio__printf("nc: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("nc: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     stdio__printf("Scanning %s %u-%u (tcp)...\n", host, (unsigned int)low, (unsigned int)high);

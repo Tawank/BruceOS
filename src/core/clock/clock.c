@@ -1,11 +1,10 @@
 #include "clock.h"
 
-#include "core/wifi/wifi_common.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
-#include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 
 #include <stdbool.h>
 #include <sys/time.h>
@@ -121,12 +120,8 @@ static bruce_result_t clock__sync_ntp_internal(uint32_t timeout_ms, bool check_p
     if (check_permissions) {
         bruce_result_t permission = permission__check(BRUCE_PERMISSION_CONFIG);
         if (permission != BRUCE_OK) return permission;
-        permission = permission__check(BRUCE_PERMISSION_WIFI);
-        if (permission != BRUCE_OK) return permission;
     }
-    if (!(check_permissions ? wifi__is_connected() : wifi__is_connected_internal())) {
-        return BRUCE_ERR_INVALID_STATE;
-    }
+    if (!net__is_online()) return BRUCE_ERR_INVALID_STATE;
     if (!clock__ensure_lock()) return BRUCE_ERR_NO_MEMORY;
     if (xSemaphoreTake(s_sync_lock, 0) != pdTRUE) return BRUCE_ERR_BUSY;
 

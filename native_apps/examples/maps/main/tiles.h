@@ -46,7 +46,7 @@ typedef struct {
     const char *dir;
     const char *url;
     bool online;
-    bool connecting; /* Background Wi-Fi connect in progress. */
+    bool connecting; /* Background net__connect_start() in progress. */
     bool network_down;
     uint64_t network_checked_ms;
     uint64_t wifi_retry_ms;
@@ -56,7 +56,7 @@ bool tiles__init(tiles_t *tiles, size_t min_slots, const char *dir, const char *
 void tiles__deinit(tiles_t *tiles);
 void tiles__set_online(tiles_t *tiles, bool online);
 
-/* Follows the background Wi-Fi connect and notices Wi-Fi coming back (checked at most once a
+/* Follows the background connect and notices the connection coming back (checked at most once a
  * second), retrying missing tiles then. Returns true when the network state changed. */
 bool tiles__check_network(tiles_t *tiles);
 

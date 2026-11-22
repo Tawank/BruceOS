@@ -551,7 +551,15 @@ static void wifi__connect_known_task(void *arg) {
 
 bruce_result_t wifi__connect_known_start(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
+    return result == BRUCE_OK ? wifi__connect_known_start_internal() : result;
+}
+
+bruce_result_t wifi__connect_known_poll(void) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    return result == BRUCE_OK ? wifi__connect_known_poll_internal() : result;
+}
+
+bruce_result_t wifi__connect_known_start_internal(void) {
     if (wifi__is_connected_internal()) return BRUCE_OK;
 
     portENTER_CRITICAL(&s_connect_mux);
@@ -571,12 +579,10 @@ bruce_result_t wifi__connect_known_start(void) {
     return BRUCE_OK;
 }
 
-bruce_result_t wifi__connect_known_poll(void) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
+bruce_result_t wifi__connect_known_poll_internal(void) {
     portENTER_CRITICAL(&s_connect_mux);
     bool running = s_connect_running;
-    result = s_connect_result;
+    bruce_result_t result = s_connect_result;
     portEXIT_CRITICAL(&s_connect_mux);
     if (running) return BRUCE_ERR_BUSY;
     return wifi__is_connected_internal() ? BRUCE_OK : result;

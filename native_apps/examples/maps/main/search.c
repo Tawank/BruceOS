@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 #include "geo.h"
 
 #define SEARCH_USER_AGENT "BruceOS-Maps/0.1"
@@ -271,8 +271,8 @@ bruce_result_t search__start(search_t *search, const char *base, const char *que
     if (!search__build_url(base, query, view, width, height, search->url, sizeof(search->url))) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (wifi__is_connected()) return search__request(search);
-    bruce_result_t result = wifi__connect_known_start();
+    if (net__is_online()) return search__request(search);
+    bruce_result_t result = net__connect_start();
     if (result == BRUCE_OK) search->state = SEARCH_CONNECTING;
     return result;
 }
@@ -296,7 +296,7 @@ static bruce_result_t search__collect(search_t *search, search_place_t *places, 
 bruce_result_t search__poll(search_t *search, search_place_t *places, size_t *out_count) {
     *out_count = 0;
     if (search->state == SEARCH_CONNECTING) {
-        bruce_result_t result = wifi__connect_known_poll();
+        bruce_result_t result = net__connect_poll();
         if (result == BRUCE_ERR_BUSY) return result;
         if (result != BRUCE_OK) {
             search->state = SEARCH_IDLE;

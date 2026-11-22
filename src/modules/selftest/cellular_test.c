@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "core/cellular/cellular.h"
+#include "core/cellular/cmux.h"
 
 static cellular_line_t selftest__cellular_feed(cellular_model_t *model, const char *line, uint64_t now_ms) {
     return cellular__parse_line(model, line, now_ms);
@@ -139,6 +140,47 @@ bool selftest__run_cellular_sms_case(void) {
         ucs2,
         long_part,
         encode
+    );
+    return ok;
+}
+
+bool selftest__run_cellular_cmux_case(void) {
+    static uint8_t frame[CMUX_FRAME_MAX];
+    /* 27.010's SABM on DLC 0, and the close-down esp_modem sends. */
+    static const uint8_t sabm[] = {0xF9, 0x03, 0x3F, 0x01, 0x1C, 0xF9};
+    static const uint8_t close_down[] = {0xF9, 0x03, 0xEF, 0x05, 0xC3, 0x01, 0xF2, 0xF9};
+    size_t size = cmux__frame(0, CMUX_SABM | CMUX_PF, NULL, 0, frame);
+    bool encode = size == sizeof(sabm) && memcmp(frame, sabm, size) == 0;
+    size = cmux__frame(0, CMUX_UIH, close_down + 4, 2, frame);
+    encode = encode && size == sizeof(close_down) && memcmp(frame, close_down, size) == 0;
+
+    static cmux_parser_t parser;
+    cmux_frame_t got = {0};
+    int frames = 0;
+    cmux__reset(&parser);
+    /* Noise before the first flag, the modem's UA on DLC 0, a frame with a
+     * bad FCS, and a 200-byte UIH on DLC 2 with a two-byte length. */
+    static const uint8_t ua[] = {0x12, 0x34, 0xF9, 0x03, 0x73, 0x01, 0xD7, 0xF9};
+    for (size_t i = 0; i < sizeof(ua); ++i) frames += cmux__feed(&parser, ua[i], &got);
+    bool reply = frames == 1 && got.dlci == 0 && got.control == CMUX_UA && got.length == 0;
+    static const uint8_t bad[] = {0xF9, 0x09, 0xEF, 0x03, 0x41, 0x00, 0xF9};
+    for (size_t i = 0; i < sizeof(bad); ++i) frames += cmux__feed(&parser, bad[i], &got);
+    bool dropped = frames == 1;
+    uint8_t payload[200];
+    for (size_t i = 0; i < sizeof(payload); ++i) payload[i] = (uint8_t)(i == 7 ? 0xF9 : i);
+    size = cmux__frame(2, CMUX_UIH, payload, sizeof(payload), frame);
+    for (size_t i = 0; i < size; ++i) frames += cmux__feed(&parser, frame[i], &got);
+    bool data = frames == 2 && got.dlci == 2 && got.control == CMUX_UIH && got.length == sizeof(payload) &&
+                memcmp(got.data, payload, sizeof(payload)) == 0;
+
+    bool ok = encode && reply && dropped && data;
+    printf(
+        "[selftest] cellular/cmux: %s (encode=%d reply=%d dropped=%d data=%d)\n",
+        ok ? "OK" : "FAIL",
+        encode,
+        reply,
+        dropped,
+        data
     );
     return ok;
 }

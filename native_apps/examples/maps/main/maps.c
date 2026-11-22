@@ -158,7 +158,7 @@ static void maps__pick_place(maps_t *app, const search_place_t *places, size_t c
 static void maps__search_finished(maps_t *app, bruce_result_t result, const search_place_t *places, size_t count) {
     app->dirty = true;
     if (result != BRUCE_OK) {
-        const char *message = wifi__is_connected() ? "Search failed, try again later" : "No Wi-Fi connection";
+        const char *message = net__is_online() ? "Search failed, try again later" : "No internet connection";
         dialog__message(BRUCE_DIALOG_WARNING, "Search", message);
     } else if (count == 0) {
         dialog__message(BRUCE_DIALOG_INFO, "Search", "No places found");
@@ -399,9 +399,9 @@ static void maps__update_status(maps_t *app, size_t loading) {
     app->hud.status = searching    ? "Searching"
                       : connecting ? "Connecting"
                       : loading > 0 ? "Loading"
-                      : offline    ? "No Wi-Fi"
+                      : offline    ? "Offline"
                                    : NULL;
-    app->hud.status_icon = searching ? "magnify" : connecting ? "wifi" : offline ? "wifi-cancel" : NULL;
+    app->hud.status_icon = searching ? "magnify" : connecting ? "web" : offline ? "wifi-cancel" : NULL;
     if (app->hud.status != before) app->dirty = true;
 }
 

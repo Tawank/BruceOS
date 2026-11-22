@@ -96,6 +96,7 @@ static void config__free_config(config__t *cfg) {
         config__release(&cfg->wifiCredentials[i].password);
     }
     config__release(&cfg->wifiMac);
+    config__release(&cfg->cellularApn);
     for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i) config__release(&cfg->startup.items[i]);
 }
 
@@ -172,6 +173,7 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->wifiApSsid, "BruceNet");
     config__assign(&cfg->wifiApPassword, "brucenet");
     config__assign(&cfg->wifiMac, "");
+    config__assign(&cfg->cellularApn, "");
 
     static const char *const default_startup_apps[] = {
         "device_bus",
@@ -344,7 +346,11 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     if (cJSON_IsObject(storage)) json_get_bool(storage, "appdataOnSd", &cfg->appdataOnSd);
 
     const cJSON *cellular = cJSON_GetObjectItemCaseSensitive(root, "cellular");
-    if (cJSON_IsObject(cellular)) json_get_bool(cellular, "enabled", &cfg->cellularEnabled);
+    if (cJSON_IsObject(cellular)) {
+        json_get_bool(cellular, "enabled", &cfg->cellularEnabled);
+        json_get_bool(cellular, "data", &cfg->cellularData);
+        json_get_string(cellular, "apn", &cfg->cellularApn);
+    }
 
     const cJSON *sound = cJSON_GetObjectItemCaseSensitive(root, "sound");
     if (cJSON_IsObject(sound)) {
@@ -483,6 +489,8 @@ static cJSON *config__build_json(const config__t *cfg) {
 
     cJSON *cellular = cJSON_AddObjectToObject(root, "cellular");
     cJSON_AddBoolToObject(cellular, "enabled", cfg->cellularEnabled);
+    cJSON_AddBoolToObject(cellular, "data", cfg->cellularData);
+    cJSON_AddStringToObject(cellular, "apn", config__or_empty(cfg->cellularApn));
 
     cJSON *sound = cJSON_AddObjectToObject(root, "sound");
     cJSON_AddBoolToObject(sound, "enabled", cfg->soundEnabled);
@@ -963,6 +971,22 @@ CONFIG__DEFINE_BOOL_FIELD(time_clock24hr, timeClock24hr)
 CONFIG__DEFINE_BOOL_FIELD(sound_enabled, soundEnabled)
 CONFIG__DEFINE_BOOL_FIELD_GUARDED(appdata_on_sd, appdataOnSd, config__guard_core)
 CONFIG__DEFINE_BOOL_FIELD_GUARDED(cellular_enabled, cellularEnabled, config__guard_core)
+CONFIG__DEFINE_BOOL_FIELD_GUARDED(cellular_data, cellularData, config__guard_core)
+
+void config__get_cellular_apn(char *out, size_t capacity) {
+    out[0] = '\0';
+    if (!config__init()) return;
+    config__lock();
+    snprintf(out, capacity, "%s", config__or_empty(s_config.cellularApn));
+    config__unlock();
+}
+
+bruce_result_t config__set_cellular_apn(const char *apn) {
+    if (!config__init()) return BRUCE_ERR_IO;
+    config__lock();
+    config__assign(&s_config.cellularApn, apn);
+    return config__save_and_unlock() ? BRUCE_OK : BRUCE_ERR_IO;
+}
 CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
 
 /* Lock-free: audio playback calls this for every chunk and must never wait

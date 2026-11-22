@@ -1,6 +1,7 @@
 #include "config_app.h"
 
 #include "args.h"
+#include "core_sdk/cellular.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
@@ -747,6 +748,80 @@ static int config_app__audio_cli(ArgParser *audio_parser, ArgParser *enabled, Ar
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+static const char *config_app__data_state(bruce_cellular_data_state_t state) {
+    switch (state) {
+        case BRUCE_CELLULAR_DATA_OFF: return "off";
+        case BRUCE_CELLULAR_DATA_WAITING: return "waiting for the network";
+        case BRUCE_CELLULAR_DATA_CONNECTING: return "connecting";
+        case BRUCE_CELLULAR_DATA_CONNECTED: return "connected";
+        case BRUCE_CELLULAR_DATA_FAILED: return "the modem could not start it";
+    }
+    return "";
+}
+
+static int config_app__mobile_gui(void) {
+    if (!cellular__is_available()) {
+        dialog__message(BRUCE_DIALOG_INFO, "Mobile data", "This device has no cellular modem");
+        return BRUCE_OK;
+    }
+    for (;;) {
+        bruce_cellular_data_status_t data;
+        bruce_result_t result = cellular__get_data_status(&data);
+        if (result != BRUCE_OK) return result;
+        char data_label[32], apn_label[24 + BRUCE_CELLULAR_APN_MAX], message[64];
+        snprintf(data_label, sizeof(data_label), "Mobile data: %s", data.enabled ? "ON" : "OFF");
+        snprintf(apn_label, sizeof(apn_label), "APN: %s", data.apn[0] != '\0' ? data.apn : "automatic");
+        snprintf(
+            message, sizeof(message), "Status: %s%s%s", config_app__data_state(data.state),
+            data.ip[0] != '\0' ? "\n" : "", data.ip
+        );
+        const bruce_dialog_choice_t choices[] = {
+            {.label = data_label, .value = "data"},
+            {.label = apn_label,  .value = "apn" },
+            {.label = "Back",     .value = "back"},
+        };
+        size_t selected = 0;
+        result = dialog__choice_launcher("Mobile data", message, choices, 3, &selected);
+        if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == 2)) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        if (selected == 0) {
+            result = cellular__set_data(!data.enabled);
+        } else {
+            char apn[BRUCE_CELLULAR_APN_MAX];
+            if (dialog__text_input("APN", "Empty: automatic", data.apn, false, apn, sizeof(apn)) != BRUCE_OK)
+                continue;
+            if (cellular__set_apn(apn) != BRUCE_OK)
+                dialog__message(BRUCE_DIALOG_ERROR, "APN", "Use letters, digits, dots and dashes");
+        }
+        if (result != BRUCE_OK) return result;
+    }
+}
+
+/* "config mobile", "config mobile data on|off", "config mobile apn <name>". */
+static int config_app__mobile_cli(ArgParser *mobile) {
+    if (!cellular__is_available()) {
+        stdio__printf("This device has no cellular modem\n");
+        return BRUCE_ERR_UNSUPPORTED;
+    }
+    const char *setting = ap_get_arg(mobile, "setting");
+    const char *value = ap_get_arg(mobile, "value");
+    if (setting != NULL && strcmp(setting, "data") == 0 && value != NULL) {
+        bool on;
+        return config_app__parse_on_off(value, &on) ? cellular__set_data(on) : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (setting != NULL && strcmp(setting, "apn") == 0) return cellular__set_apn(value != NULL ? value : "");
+    if (setting != NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_cellular_data_status_t data;
+    bruce_result_t result = cellular__get_data_status(&data);
+    if (result != BRUCE_OK) return result;
+    stdio__printf(
+        "Mobile data: %s (%s)\nAPN: %s\n", data.enabled ? "on" : "off", config_app__data_state(data.state),
+        data.apn[0] != '\0' ? data.apn : "automatic"
+    );
+    if (data.ip[0] != '\0') stdio__printf("Address: %s\n", data.ip);
+    return BRUCE_OK;
+}
+
 /* Per-item action sheet for one startup app: reorder it, remove it, or back
  * out unchanged. `index`/`count` place it within the current list so
  * "Move up"/"Move down" can be hidden at either edge. A successful move
@@ -1002,6 +1077,7 @@ int config_app_main(int argc, char **argv) {
     ArgParser *audio = ap_new_cmd(root, "audio");
     ArgParser *audio_enabled = audio != NULL ? ap_new_cmd(audio, "enabled") : NULL;
     ArgParser *audio_volume = audio != NULL ? ap_new_cmd(audio, "volume") : NULL;
+    ArgParser *mobile = ap_new_cmd(root, "mobile");
     ArgParser *parsers[] = {
         system,
         clock,
@@ -1036,6 +1112,7 @@ int config_app_main(int argc, char **argv) {
         audio,
         audio_enabled,
         audio_volume,
+        mobile,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -1105,6 +1182,9 @@ int config_app_main(int argc, char **argv) {
     ap_add_optional_arg(audio_enabled, "state", "on or off (required outside GUI mode)");
     ap_set_helptext(audio_volume, "Set the sound volume.");
     ap_add_optional_arg(audio_volume, "percent", "0 to 100 (required outside GUI mode)");
+    ap_set_helptext(mobile, "Mobile data: data on|off, apn <name> (none: automatic).");
+    ap_add_optional_arg(mobile, "setting", "data or apn");
+    ap_add_optional_arg(mobile, "value", "on/off, or the APN");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -1121,6 +1201,7 @@ int config_app_main(int argc, char **argv) {
     bool display_hierarchy = root_action == display;
     bool theme_hierarchy = root_action == theme;
     bool audio_hierarchy = root_action == audio;
+    bool mobile_hierarchy = root_action == mobile;
     bool gui = runtime__is_gui_requested();
     int result;
     if (clock_hierarchy) {
@@ -1133,6 +1214,8 @@ int config_app_main(int argc, char **argv) {
         result = gui ? config_app__instant_boot_gui() : config_app__instant_boot_cli(instant_boot, instant_boot_toggle);
     } else if (wifi_startup_hierarchy) {
         result = gui ? config_app__wifi_startup_gui() : config_app__wifi_startup_cli(wifi_startup, wifi_startup_toggle);
+    } else if (mobile_hierarchy) {
+        result = gui ? config_app__mobile_gui() : config_app__mobile_cli(mobile);
     } else if (audio_hierarchy) {
         result = gui ? config_app__audio_gui() : config_app__audio_cli(audio, audio_enabled, audio_volume);
     } else if (display_hierarchy) {

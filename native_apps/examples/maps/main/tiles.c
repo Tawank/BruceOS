@@ -7,7 +7,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 #include "geo.h"
 
 #define TILES_BYTES (GEO_TILE_SIZE * GEO_TILE_SIZE * 2)
@@ -75,7 +75,7 @@ static void tiles__network_back(tiles_t *tiles) {
 
 bool tiles__check_network(tiles_t *tiles) {
     if (tiles->connecting) {
-        bruce_result_t result = wifi__connect_known_poll();
+        bruce_result_t result = net__connect_poll();
         if (result == BRUCE_ERR_BUSY) return false;
         tiles->connecting = false;
         if (result == BRUCE_OK) tiles__network_back(tiles);
@@ -86,7 +86,7 @@ bool tiles__check_network(tiles_t *tiles) {
     uint64_t now = runtime__now();
     if (now < tiles->network_checked_ms + TILES_NETWORK_CHECK_MS) return false;
     tiles->network_checked_ms = now;
-    if (!wifi__is_connected()) return false;
+    if (!net__is_online()) return false;
     tiles__network_back(tiles);
     return true;
 }
@@ -158,17 +158,17 @@ static void tiles__make_parent_dirs(const char *path) {
     }
 }
 
-/* Uses Wi-Fi when it is up; otherwise starts connecting to a saved network in
- * the background, at most every 30 s, and reports not ready meanwhile. */
+/* Uses the network when online; otherwise starts getting online (Wi-Fi or
+ * mobile data) in the background, at most every 30 s, and reports not ready meanwhile. */
 static bool tiles__network_ready(tiles_t *tiles) {
     if (!tiles->online) return false;
-    if (wifi__is_connected()) {
+    if (net__is_online()) {
         if (tiles->network_down) tiles__network_back(tiles);
         return true;
     }
     if (!tiles->connecting && runtime__now() >= tiles->wifi_retry_ms) {
         tiles->wifi_retry_ms = runtime__now() + TILES_WIFI_RETRY_MS;
-        tiles->connecting = wifi__connect_known_start() == BRUCE_OK;
+        tiles->connecting = net__connect_start() == BRUCE_OK;
         if (!tiles->connecting) tiles->network_down = true;
     }
     return false;
@@ -259,7 +259,7 @@ tiles__finish(tiles_t *tiles, tile_key_t key, bruce_result_t result, const bruce
     bool ok = result == BRUCE_OK && response->status_code == 200 && response->body_len > 0 &&
               tiles__save(tiles, key, response);
     if (!ok) tiles__mark_missing(tiles, key);
-    if (result == BRUCE_ERR_IO && !wifi__is_connected()) tiles->network_down = true;
+    if (result == BRUCE_ERR_IO && !net__is_online()) tiles->network_down = true;
 }
 
 bool tiles__poll(tiles_t *tiles) {

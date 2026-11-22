@@ -87,6 +87,9 @@ typedef struct {
 
     /* Cellular modem kept on, so calls come in. */
     bool cellularEnabled;
+    /* Mobile data over the modem, and its access point name (empty: the modem's default). */
+    bool cellularData;
+    const char *cellularApn;
 
     /* Misc */
     bruce_config_startup_apps_t startup;
@@ -129,6 +132,10 @@ bruce_result_t config__set_appdata_on_sd(bool value);
 /* Whether the cellular modem is on (core/cellular). */
 bool config__get_cellular_enabled(void);
 bruce_result_t config__set_cellular_enabled(bool value);
+bool config__get_cellular_data(void);
+bruce_result_t config__set_cellular_data(bool value);
+void config__get_cellular_apn(char *out, size_t capacity);
+bruce_result_t config__set_cellular_apn(const char *apn);
 
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);

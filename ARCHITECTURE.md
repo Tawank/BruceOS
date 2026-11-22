@@ -500,6 +500,36 @@ the modem: `AT+CLCC`, where an incoming call first seen there rings like one
 announced by `RING`, and `AT+CPMS?`, where a message count above the one
 before sleep announces a missed text.
 
+Mobile data (`cellular__set_data()`, `cellular__set_apn()`, saved as
+`cellular.data` and `cellular.apn`; Config > Mobile Data, `config mobile`) is lwIP PPP over the modem's CMUX
+multiplexer, so calls and texts keep working during a data link. Once the
+modem is registered, Core sends `AT+CMUX=0` (basic mode, the modem's default
+frame size of 1500) and opens DLC 0 to 2. From then on the UART carries
+27.010 frames: a `cellular_mux` task splits them, AT traffic goes to DLC 1
+(set up again with the same commands, plus `AT+CATR=4` so URCs come there),
+and DLC 2 dials `ATD*99#` (after `AT+CGDCONT=1` when an APN is set) and then
+carries PPP for an esp-netif PPP interface. esp-netif keeps a started Wi-Fi
+station as the default interface even while it is not connected, so Core
+picks the default itself: Wi-Fi while it is connected with an address,
+otherwise the data link, with the DNS servers the network gave it put back.
+Core watches the PPP phase and dials again 10 seconds after the link drops
+(LCP echo notices a dead one); a registration report in between does not
+end a running link. A DLC 2 that still sits in data mode from the last link
+gets `+++` (a second of silence on each side, per the manual) and `ATH`.
+
+Apps that only need the internet don't touch Wi-Fi: `net__is_online()` is
+true while Wi-Fi or mobile data is up, and `net__connect_start()` /
+`net__connect_poll()` join a saved Wi-Fi network (Wi-Fi's own connect,
+without the `wifi` permission, since the app picks nothing) or wait up to a
+minute for mobile data that is turned on. Browser, Maps, ssh/sftp and nc use
+them; `clock__sync_ntp()` only needs to be online, and a new mobile data link
+starts the automatic NTP sync as a Wi-Fi connection does.
+CMUX stays on until the modem is turned off. A modem left in CMUX by a reboot
+gets 27.010's close-down frame when it does not answer `AT`. The framer is
+pure (`cmux.c`) and covered by the `cellular/cmux` selftest.
+`BRUCE_CELLULAR_ENABLED` selects `LWIP_PPP_SUPPORT` (IPv4 only, no VJ, about
+25 KB of flash), so boards without a modem don't carry it.
+
 ### Clock and time
 
 Core keeps the libc system clock in UTC. `clock__get_utc()` reads it directly,

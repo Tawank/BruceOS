@@ -14,12 +14,12 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/net.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/result.h"
 #include "core_sdk/ssh.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/wifi.h"
 
 /**
  * @brief SFTP client: the "sftp" provider for filemanager's "/Network" folder.
@@ -578,8 +578,8 @@ static bruce_result_t sftp_app__connect(
     const char *host, uint16_t port, const char *username, const char *identity, const char *display_host,
     bruce_ssh_id_t *out_session
 ) {
-    if (!wifi__is_connected()) {
-        stdio__printf("SFTP client: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("SFTP client: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);

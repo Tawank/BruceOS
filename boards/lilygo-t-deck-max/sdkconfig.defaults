@@ -131,5 +131,11 @@ CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN=0
 CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN=8
 CONFIG_BRUCE_CELLULAR_AUDIO_XL9555_PIN=10
 CONFIG_BRUCE_CELLULAR_RI_GPIO=7
+# Mobile data: the modem selects lwIP PPP; IPv4 only and no VJ compression
+# keep its code small. LCP echo notices a link that died silently.
+# CONFIG_LWIP_PPP_ENABLE_IPV6 is not set
+# CONFIG_LWIP_PPP_VJ_HEADER_COMPRESSION is not set
+CONFIG_LWIP_ENABLE_LCP_ECHO=y
+CONFIG_LWIP_LCP_ECHOINTERVAL=30
 
 # No infrared or NRF24 on this board; left at the Kconfig defaults.

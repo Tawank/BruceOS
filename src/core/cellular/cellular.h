@@ -83,6 +83,10 @@ bool cellular__sms_ascii(const char *text);
  * With out NULL it only checks. */
 size_t cellular__sms_ucs2(const char *text, size_t max_chars, char *out, size_t capacity);
 
+/* Mobile data for net__connect_*(): the link is up; or it is on and may still come up. */
+bool cellular__data_online(void);
+bool cellular__data_pending(void);
+
 /* Cuts the modem's power before deep sleep. */
 void cellular__power_off(void);
 

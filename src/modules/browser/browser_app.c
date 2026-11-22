@@ -22,12 +22,12 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 
 /* Where "Save image"/"Copy image" (see browser_app__image_menu()) write a
  * fetched image, created on first use. */
 #define BROWSER_DOWNLOAD_DIR "/Downloads"
-/* Input wait while a page, Wi-Fi connect or image is in flight; the loop does
+/* Input wait while a page, connect or image is in flight; the loop does
  * a slice of that work every time it wakes. Idle, it blocks on input. */
 #define BROWSER_BUSY_POLL_MS 30
 
@@ -52,7 +52,7 @@ typedef struct {
 } browser_app_state_t;
 
 static const char *browser_app__load_message(const browser_app_state_t *state) {
-    return state->phase == BROWSER_LOAD_CONNECTING ? "Connecting Wi-Fi..." : "Loading...";
+    return state->phase == BROWSER_LOAD_CONNECTING ? "Connecting..." : "Loading...";
 }
 
 static void browser_app__draw_loading(browser_app_state_t *state, int percent) {
@@ -156,8 +156,8 @@ static void browser_app__start_page(browser_app_state_t *state) {
     browser_app__draw_loading(state, 0);
 }
 
-/* Starts a load and returns at once; browser_app__step() carries it on. Wi-Fi
- * that isn't up yet is connected first, in the background too. */
+/* Starts a load and returns at once; browser_app__step() carries it on. When
+ * offline, it gets online first (Wi-Fi or mobile data), in the background too. */
 static void browser_app__navigate(browser_app_state_t *state, const char *raw_url, bool push_history) {
     char url[BROWSER_URL_MAX];
     if (!browser_page__normalize_url(raw_url, url, sizeof(url))) {
@@ -171,10 +171,10 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
     browser_document__reset(state->doc);
     browser_document__set_url(state->doc, url);
 
-    if (!wifi__is_connected()) {
-        bruce_result_t result = wifi__connect_known_start();
+    if (!net__is_online()) {
+        bruce_result_t result = net__connect_start();
         if (result != BRUCE_OK) {
-            browser_app__finish_load(state, result, 0, "connect to Wi-Fi");
+            browser_app__finish_load(state, result, 0, "connect to the internet");
             return;
         }
         state->phase = BROWSER_LOAD_CONNECTING;
@@ -207,12 +207,12 @@ browser_app__fit_image(browser_app_state_t *state, const char *url, const image_
     if (result == BRUCE_ERR_BUSY) (void)notification__push("Loading image...", 30000);
 }
 
-/* One slice of background work: Wi-Fi connect, page streaming, image fetch. */
+/* One slice of background work: getting online, page streaming, image fetch. */
 static void browser_app__step(browser_app_state_t *state) {
     if (state->phase == BROWSER_LOAD_CONNECTING) {
-        bruce_result_t result = wifi__connect_known_poll();
+        bruce_result_t result = net__connect_poll();
         if (result == BRUCE_OK) browser_app__start_page(state);
-        else if (result != BRUCE_ERR_BUSY) browser_app__finish_load(state, result, 0, "connect to Wi-Fi");
+        else if (result != BRUCE_ERR_BUSY) browser_app__finish_load(state, result, 0, "connect to the internet");
         if (result != BRUCE_ERR_BUSY) browser_app__redraw(state);
     } else if (state->phase == BROWSER_LOAD_PAGE) {
         int status_code = 0;

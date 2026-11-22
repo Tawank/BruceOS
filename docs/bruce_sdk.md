@@ -189,6 +189,9 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `cellular__get_messages` (cellular.h)
 - `cellular__delete_message` (cellular.h)
 - `cellular__send_message` (cellular.h)
+- `cellular__set_data` (cellular.h)
+- `cellular__set_apn` (cellular.h)
+- `cellular__get_data_status` (cellular.h)
 
 ### `process`
 
@@ -262,7 +265,6 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 
 ### `wifi`
 
-- `clock__sync_ntp` (clock.h)
 - `icmp__ping` (icmp.h)
 - `tcp__connect` (tcp.h)
 - `tcp__connect_from` (tcp.h)
@@ -3653,7 +3655,8 @@ messages can come in. An incoming call shows a notification and opens the
 phone app; one that ends unanswered shows a missed-call notification.
 Ended calls are kept in a small log since boot, so the phone app can record
 them even when it was not running. Received messages stay on the SIM, with
-a notification, until an app reads and deletes them.
+a notification, until an app reads and deletes them. Mobile data, when
+turned on, gives apps internet access over the modem.
 
 **Constants**
 
@@ -3665,6 +3668,7 @@ a notification, until an app reads and deletes them.
 | `BRUCE_CELLULAR_TEXT_MAX` | `400` |
 | `BRUCE_CELLULAR_SMS_ASCII_MAX` | `160` |
 | `BRUCE_CELLULAR_SMS_UCS2_MAX` | `70` |
+| `BRUCE_CELLULAR_APN_MAX` | `64` |
 
 ---
 
@@ -3764,6 +3768,35 @@ typedef struct {
     char number[BRUCE_CELLULAR_NUMBER_MAX]; /**< The sender; may be a name such as "Orange". */
     char text[BRUCE_CELLULAR_TEXT_MAX];     /**< UTF-8; each part of a long message is its own message. */
 } bruce_cellular_message_t;
+```
+
+
+---
+
+## bruce_cellular_data_state_t()
+
+```c
+typedef enum {
+    BRUCE_CELLULAR_DATA_OFF = 0,
+    BRUCE_CELLULAR_DATA_WAITING,    /**< On, waiting for the modem to register. */
+    BRUCE_CELLULAR_DATA_CONNECTING,
+    BRUCE_CELLULAR_DATA_CONNECTED,
+    BRUCE_CELLULAR_DATA_FAILED, /**< The modem could not start a data link; tried again when turned on again. */
+} bruce_cellular_data_state_t;
+```
+
+
+---
+
+## bruce_cellular_data_status_t()
+
+```c
+typedef struct {
+    bool enabled;
+    bruce_cellular_data_state_t state;
+    char apn[BRUCE_CELLULAR_APN_MAX];
+    char ip[16]; /**< Dotted IPv4 address while connected, else empty. */
+} bruce_cellular_data_status_t;
 ```
 
 
@@ -4106,6 +4139,89 @@ Longer text returns BRUCE_ERR_RESOURCE_LIMIT.
 | --- | --- | --- |
 | `number` | `const char *` | The recipient's number. |
 | `text` | `const char *` | The message, UTF-8. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__set_data()
+
+```c
+bruce_result_t cellular__set_data(bool enabled);
+```
+
+Turns mobile data on or off; remembered across reboots.
+
+While on and the modem is registered, Core keeps a data link up and
+reconnects it when it drops. Apps then reach the internet over it with the
+usual network calls; Wi-Fi is preferred while it is connected. Calls and
+messages keep working during a data link.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `enabled` | `bool` | Whether mobile data should be on. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__set_apn()
+
+```c
+bruce_result_t cellular__set_apn(const char *apn);
+```
+
+Sets the access point name for mobile data; remembered across reboots.
+
+An empty name uses whatever the modem and network pick, which works for
+most SIMs. A running link reconnects with the new name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `apn` | `const char *` | Up to BRUCE_CELLULAR_APN_MAX - 1 printable characters, no quotes. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__get_data_status()
+
+```c
+bruce_result_t cellular__get_data_status(bruce_cellular_data_status_t *out);
+```
+
+Reads the mobile data state.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out` | `bruce_cellular_data_status_t *` | Receives the state. |
 
 ### Returns
 
@@ -4619,7 +4735,7 @@ bruce_result_t clock__sync_ntp(uint32_t timeout_ms);
 
 Synchronizes the clock over the network.
 
-Wi-Fi must already be connected.
+The device must already be online (net__is_online()), over Wi-Fi or mobile data.
 
 ### Parameters
 
@@ -4634,7 +4750,6 @@ Wi-Fi must already be connected.
 #### Permissions
 
 - `config`
-- `wifi`
 
 
 ---
@@ -15092,6 +15207,61 @@ expanding a CIDR range into individual host addresses to probe).
 | Name | Value |
 |---|---|
 | `BRUCE_NET_IPV4_TEXT_MAX` | `16` |
+
+---
+
+## net__is_online()
+
+```c
+bool net__is_online(void);
+```
+
+Whether the device can reach the internet now, over Wi-Fi or mobile data. Not permission-gated.
+
+### Returns
+
+`bool`
+
+
+---
+
+## net__connect_start()
+
+```c
+bruce_result_t net__connect_start(void);
+```
+
+Starts getting online without waiting.
+
+Joins a saved Wi-Fi network in range, or waits for mobile data when it is
+turned on; the app picks no network, so this needs no `wifi` permission.
+Returns BRUCE_OK straight away when already online. Follow up with
+net__connect_poll(). Not permission-gated; the calls that then use the
+network check their own permissions.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## net__connect_poll()
+
+```c
+bruce_result_t net__connect_poll(void);
+```
+
+Result of net__connect_start().
+
+BRUCE_OK once online, BRUCE_ERR_BUSY while trying, BRUCE_ERR_TIMEOUT when
+mobile data did not come up within a minute, otherwise why Wi-Fi failed
+(BRUCE_ERR_NOT_FOUND when no saved network is in range).
+
+### Returns
+
+`bruce_result_t`
+
 
 ---
 

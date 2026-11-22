@@ -19,7 +19,7 @@ typedef struct {
 
 typedef enum {
     SEARCH_IDLE,
-    SEARCH_CONNECTING, /* Waiting for the background Wi-Fi connect. */
+    SEARCH_CONNECTING, /* Waiting for the background net__connect_start(). */
     SEARCH_RUNNING,
 } search_state_t;
 
@@ -40,7 +40,7 @@ bool search__build_url(
     const char *base, const char *query, const map_view_t *view, int width, int height, char *out, size_t capacity
 );
 
-/* Starts in the background, connecting Wi-Fi first when needed. */
+/* Starts in the background, getting online first when needed. */
 bruce_result_t search__start(search_t *search, const char *base, const char *query, const map_view_t *view,
                              int width, int height);
 

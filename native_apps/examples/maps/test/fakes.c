@@ -12,7 +12,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 
 fakes_t fakes;
 
@@ -287,14 +287,14 @@ void image__bitmap_release(image_bitmap_t *bitmap) {
 
 /* ---- network ------------------------------------------------------------ */
 
-bool wifi__is_connected(void) { return fakes.wifi_connected; }
+bool net__is_online(void) { return fakes.wifi_connected; }
 
 void fakes__wifi_finish(void) {
     fakes.wifi_connect_busy = false;
     fakes.wifi_connected = fakes.wifi_connect_ok;
 }
 
-bruce_result_t wifi__connect_known_start(void) {
+bruce_result_t net__connect_start(void) {
     if (fakes.wifi_connected) return BRUCE_OK;
     if (fakes.wifi_connect_busy) return BRUCE_OK;
     fakes.wifi_connect_calls++;
@@ -303,7 +303,7 @@ bruce_result_t wifi__connect_known_start(void) {
     return BRUCE_OK;
 }
 
-bruce_result_t wifi__connect_known_poll(void) {
+bruce_result_t net__connect_poll(void) {
     if (fakes.wifi_connect_busy) return BRUCE_ERR_BUSY;
     return fakes.wifi_connected ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
 }

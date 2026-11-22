@@ -80,6 +80,7 @@
 #include "core_sdk/tty.h"
 #include "core_sdk/udp.h"
 #include "core_sdk/wifi.h"
+#include "core_sdk/net.h"
 
 /* core_sdk/curses.h's small, representative export subset below needs
  * extern declarations for functions/globals real ncurses defines --
@@ -2296,6 +2297,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(wifi__connect_known),
     ESP_ELFSYM_EXPORT(wifi__connect_known_start),
     ESP_ELFSYM_EXPORT(wifi__connect_known_poll),
+    ESP_ELFSYM_EXPORT(net__is_online),
+    ESP_ELFSYM_EXPORT(net__connect_start),
+    ESP_ELFSYM_EXPORT(net__connect_poll),
     ESP_ELFSYM_EXPORT(wifi__setup_ap),
     ESP_ELFSYM_EXPORT(wifi__scan),
     ESP_ELFSYM_EXPORT(wifi__scan_start),
@@ -2364,6 +2368,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(appdata__get_usage),
     ESP_ELFSYM_EXPORT(cellular__is_available),
     ESP_ELFSYM_EXPORT(cellular__set_enabled),
+    ESP_ELFSYM_EXPORT(cellular__set_data),
+    ESP_ELFSYM_EXPORT(cellular__set_apn),
+    ESP_ELFSYM_EXPORT(cellular__get_data_status),
     ESP_ELFSYM_EXPORT(cellular__get_status),
     ESP_ELFSYM_EXPORT(cellular__dial),
     ESP_ELFSYM_EXPORT(cellular__answer),

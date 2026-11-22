@@ -10,13 +10,13 @@
 #include "args.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/net.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/ssh.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
-#include "core_sdk/wifi.h"
 
 #define SSH_APP_BUFFER_SIZE 256u
 #define SSH_APP_IO_TIMEOUT_MS 20u
@@ -553,8 +553,8 @@ static const char *ssh_app__default_identity(void) {
 static bruce_result_t ssh_app__client(
     const char *host, uint16_t port, const char *username, const char *password, const char *identity
 ) {
-    if (!wifi__is_connected()) {
-        stdio__printf("SSH client: Wi-Fi is not connected\n");
+    if (!net__is_online()) {
+        stdio__printf("SSH client: not connected to the internet\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;

@@ -1016,9 +1016,10 @@ menu "Bruce hardware configuration"
         config BRUCE_CELLULAR_ENABLED
             bool "Built-in cellular modem"
             default n
+            select LWIP_PPP_SUPPORT
             help
                 A SIMCom A76xx modem on a UART, driven by core/cellular for
-                voice calls and USSD.
+                voice calls, texts, USSD and mobile data (PPP over CMUX).
 
         config BRUCE_CELLULAR_UART_PORT
             int "Modem UART port"

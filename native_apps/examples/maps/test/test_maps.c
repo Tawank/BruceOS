@@ -282,7 +282,7 @@ static void search_connects_wifi_first(void) {
     stop();
 }
 
-static void search_without_wifi_says_so(void) {
+static void search_offline_says_so(void) {
     start();
     fakes.wifi_connected = false;
     fakes.wifi_connect_ok = false;
@@ -291,7 +291,7 @@ static void search_without_wifi_says_so(void) {
     maps__search(&app);
     fakes__wifi_finish();
     maps__poll_search(&app);
-    CHECK_STR(fakes.message, "No Wi-Fi connection");
+    CHECK_STR(fakes.message, "No internet connection");
     CHECK_EQ(app.search.state, SEARCH_IDLE);
     stop();
 }
@@ -404,12 +404,12 @@ static void status_reflects_loading_and_network(void) {
     CHECK(app.hud.status == NULL);
     app.tiles.network_down = true;
     maps__update_status(&app, 0);
-    CHECK_STR(app.hud.status, "No Wi-Fi");
+    CHECK_STR(app.hud.status, "Offline");
     CHECK_STR(app.hud.status_icon, "wifi-cancel");
     app.tiles.connecting = true;
     maps__update_status(&app, 0);
     CHECK_STR(app.hud.status, "Connecting");
-    CHECK_STR(app.hud.status_icon, "wifi");
+    CHECK_STR(app.hud.status_icon, "web");
     maps__update_status(&app, 3);
     CHECK_STR(app.hud.status, "Loading");
     stop();
@@ -758,7 +758,7 @@ SUITE(maps_tests,
       TEST(single_result_goes_straight_there),
       TEST(search_reports_nothing_found_and_errors),
       TEST(search_connects_wifi_first),
-      TEST(search_without_wifi_says_so),
+      TEST(search_offline_says_so),
       TEST(back_cancels_search_not_app),
       TEST(menu_offers_clear_pin_with_a_pin),
       TEST(coordinates_name_the_pin),

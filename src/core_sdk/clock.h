@@ -53,10 +53,10 @@ bruce_result_t clock__set_local(const bruce_clock_datetime_t *local);
 /**
  * @brief Synchronizes the clock over the network.
  *
- * Wi-Fi must already be connected.
+ * The device must already be online (net__is_online()), over Wi-Fi or mobile data.
  *
  * @param timeout_ms Sync timeout in milliseconds, or 0 for 10 seconds.
- * @permission config, wifi
+ * @permission config
  */
 bruce_result_t clock__sync_ntp(uint32_t timeout_ms);
 

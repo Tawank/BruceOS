@@ -1,7 +1,7 @@
 # Maps
 
 Slippy map viewer for BruceOS. Works offline from tiles on the SD card and,
-when Wi-Fi is known, downloads missing tiles and keeps them on the SD card.
+when online, downloads missing tiles and keeps them on the SD card.
 
 ```bash
 python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app maps
@@ -75,10 +75,10 @@ works offline later. Downloads run in the background (at most 5 at once)
 through `http__request_start()`, so the map stays responsive; tiles that
 scroll off screen are cancelled. The core reuses each connection
 (keep-alive), so a burst of tiles from one server pays for one TLS
-handshake instead of one per tile. When Wi-Fi is off, the app connects to a
-saved network in the background (`wifi__connect_known_start()`, at most
-every 30 s) and shows "Connecting" meanwhile; turning Wi-Fi on elsewhere is
-picked up within a second.
+handshake instead of one per tile. When offline, the app gets online in the
+background (`net__connect_start()`: a saved Wi-Fi network, or mobile data;
+at most every 30 s) and shows "Connecting" meanwhile; a connection made
+elsewhere is picked up within a second. It needs no `wifi` permission.
 
 ## Settings
 

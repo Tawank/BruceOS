@@ -17,3 +17,7 @@
 
 bruce_result_t wifi__init(void);
 bool wifi__is_connected_internal(void);
+/* wifi__connect_known_start()/_poll() without the `wifi` permission, for
+ * net__connect_start(): the caller only gets online, it picks no network. */
+bruce_result_t wifi__connect_known_start_internal(void);
+bruce_result_t wifi__connect_known_poll_internal(void);
