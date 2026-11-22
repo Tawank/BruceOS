@@ -23,7 +23,15 @@ bool selftest__run_cellular_parse_case(void) {
     selftest__cellular_feed(&model, "+CSQ: 18,99", 0);
     selftest__cellular_feed(&model, "+COPS: 0,0,\"Orange PL\",7", 0);
     bool network = searching && cellular__model_state(&model) == BRUCE_CELLULAR_READY &&
-                   model.signal_bars == 3 && strcmp(model.operator_name, "Orange PL") == 0;
+                   model.signal_bars == 3 && strcmp(model.operator_name, "Orange PL") == 0 &&
+                   model.generation == 4;
+    selftest__cellular_feed(&model, "+COPS: 0,0,\"Orange PL\",3", 0);
+    network = network && model.generation == 2;
+    selftest__cellular_feed(&model, "+COPS: 0,0,\"Orange PL\",6", 0);
+    network = network && model.generation == 3;
+    selftest__cellular_feed(&model, "+COPS: 0", 0);
+    network = network && model.generation == 0 && model.operator_name[0] == '\0';
+    selftest__cellular_feed(&model, "+COPS: 0,0,\"Orange PL\",7", 0);
     cellular_model_t no_sim;
     cellular__model_reset(&no_sim);
     bool no_sim_final = selftest__cellular_feed(&no_sim, "+CME ERROR: 10", 0).final;

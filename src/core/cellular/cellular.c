@@ -237,8 +237,20 @@ cellular_line_t cellular__parse_line(cellular_model_t *model, const char *line, 
     } else if (cellular__starts(line, "+COPS:", &values)) {
         char name[BRUCE_CELLULAR_OPERATOR_MAX];
         model->operator_name[0] = '\0';
-        if (cellular__quoted(values, name, sizeof(name)))
+        model->generation = 0;
+        if (cellular__quoted(values, name, sizeof(name))) {
             snprintf(model->operator_name, sizeof(model->operator_name), "%s", name);
+            /* <AcT> after the name (A76XX manual, AT+COPS): 0, 1, 3 GSM; 2, 4-6,
+             * 8 UTRAN; 7 EUTRAN. */
+            const char *after = strchr(strchr(values, '"') + 1, '"');
+            if (after != NULL && after[1] == ',') {
+                int act = atoi(after + 2);
+                model->generation = act == 7                             ? 4
+                                    : act == 0 || act == 1 || act == 3   ? 2
+                                    : act == 2 || (act >= 4 && act <= 8) ? 3
+                                                                         : 0;
+            }
+        }
     } else if (cellular__starts(line, "+CUSD:", &values)) {
         cellular__cusd(model, values);
     } else if (cellular__starts(line, "+CMTI:", &values)) {
@@ -965,16 +977,22 @@ static void cellular__update_status_icon(void) {
         "signal-cellular-3",
         "signal-cellular-3",
     };
-    static const char *s_shown;
-    const char *icon = NULL;
+    static char s_shown[24];
+    char icon[24] = "";
     if (s_enabled && !s_failed) {
         bool ready = s_alive && cellular__model_state(&s_model) == BRUCE_CELLULAR_READY;
         int bars = ready ? s_model.signal_bars : 0;
-        icon = icons[bars > 0 && bars <= 4 ? bars : 0];
+        if (bars < 0 || bars > 4) bars = 0;
+        /* With the network type known: "signal-4g-3" and so on. */
+        if (ready && s_model.generation > 0) {
+            snprintf(icon, sizeof(icon), "signal-%dg-%d", s_model.generation, bars);
+        } else {
+            snprintf(icon, sizeof(icon), "%s", icons[bars]);
+        }
     }
-    if (icon == s_shown) return;
-    s_shown = icon;
-    if (icon != NULL) {
+    if (strcmp(icon, s_shown) == 0) return;
+    snprintf(s_shown, sizeof(s_shown), "%s", icon);
+    if (icon[0] != '\0') {
         (void)status_icon__push_named(CELLULAR__STATUS_ICON_KEY, icon);
     } else {
         (void)status_icon__remove(CELLULAR__STATUS_ICON_KEY);

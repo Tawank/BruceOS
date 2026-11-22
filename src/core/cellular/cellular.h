@@ -16,6 +16,7 @@ typedef struct {
     int8_t creg;  /* Registration status, -1 unknown. */
     int8_t cereg; /* LTE registration status, -1 unknown. */
     int8_t signal_bars;
+    int8_t generation; /* 2, 3 or 4 (G), from +COPS's access technology; 0 unknown. */
     char operator_name[BRUCE_CELLULAR_OPERATOR_MAX];
 
     bruce_call_state_t call;

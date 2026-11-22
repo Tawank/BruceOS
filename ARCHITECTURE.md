@@ -469,7 +469,10 @@ the call list (`AT+CLCC`) every second during a call. API calls (permission
 `phone`) are queued to that task and wait for the command's final result.
 `cellular__set_enabled()` is saved as `cellular.enabled` in `bruce.conf`, and
 an enabled modem is powered on at boot so calls can come in. While it is on,
-the signal bars are the `core.cellular` status icon. A ringing call
+the signal bars are the `core.cellular` status icon, labelled 2G, 3G or 4G
+from the access technology in `+COPS` (`signal-<n>g-<bars>` icons, drawn
+on a 16x16 grid at 1.5 SVG units per pixel so they survive the status bar's
+scaling). A ringing call
 routes the speaker and mic to the modem (an XL9555 pin), shows a notification
 and runs `GUI=1 phone incoming` (the phone app is single-instance, so a
 running one comes to the front); a call that
