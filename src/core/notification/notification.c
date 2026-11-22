@@ -53,7 +53,9 @@ bruce_result_t notification__push(const char *text, uint32_t duration_ms) {
     QueueHandle_t queue = notification__ensure_queue();
     if (queue == NULL) return BRUCE_ERR_NO_MEMORY;
     bool gui_requested = false;
-    (void)process_registry__current_context(NULL, NULL, 0, &gui_requested);
+    /* Core's own tasks (cellular, Bluetooth) aren't processes: what they
+     * announce is for whoever looks at the screen. */
+    if (process_registry__current_context(NULL, NULL, 0, &gui_requested) != BRUCE_OK) gui_requested = true;
     notification__message_t message = {0};
     message.dismiss = false;
     strncpy(message.text, text, sizeof(message.text) - 1);

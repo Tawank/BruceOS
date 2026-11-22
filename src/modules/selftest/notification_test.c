@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "core/display/display.h"
 #include "core/process/process.h"
 #include "core_sdk/config.h"
@@ -180,6 +183,29 @@ bool selftest__run_notification_console_fallback_case(void) {
         return false;
     }
     return true;
+}
+
+static volatile bool s_core_task_pushed;
+
+static void notification_test__core_task(void *arg) {
+    (void)arg;
+    (void)notification__push("from a core task", 1000);
+    s_core_task_pushed = true;
+    vTaskDelete(NULL);
+}
+
+/* A push from one of Core's own tasks, not a process (the cellular task
+ * announcing a text message), shows as a banner. */
+bool selftest__run_notification_core_task_case(void) {
+    (void)notification_test__wait_visible(false, NULL);
+    s_core_task_pushed = false;
+    if (xTaskCreate(notification_test__core_task, "notify_test", 3072, NULL, 5, NULL) != pdPASS) return false;
+    for (int i = 0; i < 200 && !s_core_task_pushed; ++i) (void)runtime__delay(10);
+    bool shown = s_core_task_pushed && notification_test__wait_visible(true, NULL);
+    (void)notification__dismiss();
+    bool hidden = notification_test__wait_visible(false, NULL);
+    printf("[selftest] notification/core-task: %s\n", shown && hidden ? "OK" : "FAIL");
+    return shown && hidden;
 }
 
 bool selftest__run_status_icon_case(void) {

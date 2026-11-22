@@ -325,6 +325,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_dialog_choice_poll_case),
     SELFTEST_CASE(selftest__run_visual_cases),
     SELFTEST_CASE(selftest__run_notification_console_fallback_case),
+    SELFTEST_CASE(selftest__run_notification_core_task_case),
     SELFTEST_CASE(selftest__run_status_icon_case),
     SELFTEST_CASE(selftest__run_clipboard_text_case),
     SELFTEST_CASE(selftest__run_clipboard_files_case),

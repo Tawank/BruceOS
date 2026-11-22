@@ -31,7 +31,8 @@
  * core_sdk/runtime.h's runtime__is_gui_requested()) is captured here, at push
  * time, and travels with the request so the consumer can render a GUI
  * banner or print a console line as appropriate -- see
- * notification__wait_request().
+ * notification__wait_request(). Pushes from Core's own tasks, which aren't
+ * processes (e.g. a new text message), always show as a banner.
  *
  * @param text Notification text (copied before return).
  * @param duration_ms How long to show it, clamped to BRUCE_NOTIFICATION_DURATION_MIN/MAX_MS.
