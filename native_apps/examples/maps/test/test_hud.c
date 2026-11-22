@@ -2,6 +2,7 @@
 
 #include "fakes.h"
 #include "hud.h"
+#include "route_fixture.h"
 #include "test.h"
 
 static void draw(double lat, double lon, int zoom, hud_state_t state, int width, int height) {
@@ -244,6 +245,33 @@ static void speed_box_bottom_left_above_scale(void) {
     }
 }
 
+static void banner_replaces_search_and_route_is_drawn(void) {
+    route_t route;
+    CHECK_EQ(route__parse(s_route_json, strlen(s_route_json), &route), BRUCE_OK);
+    hud_state_t state = {
+        .route = &route,
+        .banner_step = &route.steps[1],
+        .banner_distance = "350 m",
+        .banner_text = "Turn left onto a street whose name is far too long for one line",
+        .banner_then = "Arrive at the destination",
+        .summary = "690 m, 2 min",
+    };
+    draw(50.06, 19.93, 16, state, 240, 320);
+    CHECK(fakes__find_string("Search") == NULL);
+    CHECK(fakes__find_string("z16") == NULL);
+    CHECK(fakes__find_string("350 m") != NULL);
+    CHECK(fakes__find_prefix("Turn left onto a street") != NULL);
+    CHECK(fakes__find_string("Then arrive at the destination") != NULL);
+    CHECK(fakes__find_string("690 m, 2 min") != NULL);
+    const fake_draw_t *first = fakes__find_prefix("Turn left onto");
+    CHECK(first != NULL && first->x + 6 * (int)strlen(first->text) <= 240);
+    CHECK_STR(first->text, "Turn left onto a street whose");
+    CHECK(fakes__find_string("name is far too long for on...") != NULL);
+    CHECK(fakes__count(FAKE_LINE) > 25);     /* Route line and arrow. */
+    CHECK(fakes__count(FAKE_TRIANGLE) == 1); /* The arrowhead. */
+    route__free(&route);
+}
+
 SUITE(hud_tests,
       TEST(shows_centre_coordinates),
       TEST(negative_coordinates_keep_sign),
@@ -259,4 +287,5 @@ SUITE(hud_tests,
       TEST(me_dot_marks_gps_position),
       TEST(locate_button_bottom_right_shows_fix),
       TEST(gps_status_clear_of_buttons),
-      TEST(speed_box_bottom_left_above_scale))
+      TEST(speed_box_bottom_left_above_scale),
+      TEST(banner_replaces_search_and_route_is_drawn))

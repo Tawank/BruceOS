@@ -2,6 +2,7 @@
 #include "../main/maps.c"
 
 #include "fakes.h"
+#include "route_fixture.h"
 #include "test.h"
 
 static maps_t app;
@@ -314,14 +315,14 @@ static void menu_offers_clear_pin_with_a_pin(void) {
     start();
     maps__show_place(&app, 50, 20, "Here");
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 2;
+    fakes.choice = 3;
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 7u);
-    CHECK_STR(fakes.choice_labels[2], "Clear pin");
+    CHECK_EQ(fakes.choice_count, 8u);
+    CHECK_STR(fakes.choice_labels[3], "Clear pin");
     CHECK(!app.hud.pin);
     CHECK(app.hud.place == NULL);
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 6u);
+    CHECK_EQ(fakes.choice_count, 7u);
     stop();
 }
 
@@ -336,13 +337,13 @@ static void coordinates_name_the_pin(void) {
 static void menu_toggles_online_and_saves(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 2;
+    fakes.choice = 3;
     maps__menu(&app);
-    CHECK_STR(fakes.choice_right_text[2], "Off");
+    CHECK_STR(fakes.choice_right_text[3], "Off");
     CHECK(app.tiles.online);
     CHECK_STR(fakes__config_get("tiles.online"), "true");
     maps__menu(&app);
-    CHECK_STR(fakes.choice_right_text[2], "On");
+    CHECK_STR(fakes.choice_right_text[3], "On");
     CHECK(!app.tiles.online);
     stop();
 }
@@ -350,14 +351,14 @@ static void menu_toggles_online_and_saves(void) {
 static void menu_toggles_big_and_saves(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 3;
+    fakes.choice = 4;
     maps__menu(&app);
-    CHECK_STR(fakes.choice_labels[3], "Bigger text");
-    CHECK_STR(fakes.choice_right_text[3], "Off");
+    CHECK_STR(fakes.choice_labels[4], "Bigger text");
+    CHECK_STR(fakes.choice_right_text[4], "Off");
     CHECK(app.view.big);
     CHECK_STR(fakes__config_get("view.big"), "true");
     maps__menu(&app);
-    CHECK_STR(fakes.choice_right_text[3], "On");
+    CHECK_STR(fakes.choice_right_text[4], "On");
     CHECK(!app.view.big);
     stop();
 }
@@ -366,12 +367,12 @@ static void menu_hides_nav_mode_with_keyboard_or_touch(void) {
     start();
     fakes.has_keyboard = true;
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_EQ(fakes.choice_count, 6u);
     CHECK_STR(fakes.choice_labels[0], "Search");
     fakes.has_keyboard = false;
     fakes.has_touch = true;
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_EQ(fakes.choice_count, 6u);
     CHECK_STR(fakes.choice_labels[0], "Search");
     stop();
 }
@@ -379,7 +380,7 @@ static void menu_hides_nav_mode_with_keyboard_or_touch(void) {
 static void menu_exit_stops(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 4;
+    fakes.choice = 5;
     maps__menu(&app);
     CHECK(!app.running);
     stop();
@@ -418,12 +419,12 @@ static void status_reflects_loading_and_network(void) {
 static void menu_has_icons_and_back_last(void) {
     start();
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 6u);
+    CHECK_EQ(fakes.choice_count, 7u);
     CHECK_STR(fakes.choice_icons[0], "arrow-up-down");
-    CHECK_STR(fakes.choice_labels[5], "Back");
-    CHECK_STR(fakes.choice_icons[5], "arrow-left");
-    CHECK_STR(fakes.choice_icons[3], "format-size");
-    CHECK_STR(fakes.choice_icons[4], "power");
+    CHECK_STR(fakes.choice_labels[6], "Back");
+    CHECK_STR(fakes.choice_icons[6], "arrow-left");
+    CHECK_STR(fakes.choice_icons[4], "format-size");
+    CHECK_STR(fakes.choice_icons[5], "power");
     app.hud.nav_mode = HUD_NAV_LEFT_RIGHT;
     maps__menu(&app);
     CHECK_STR(fakes.choice_icons[0], "plus");
@@ -433,7 +434,7 @@ static void menu_has_icons_and_back_last(void) {
 static void menu_back_just_closes(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 5;
+    fakes.choice = 6;
     map_view_t before = app.view;
     maps__menu(&app);
     CHECK(app.running);
@@ -605,9 +606,9 @@ static void tapping_locate_button_and_menu_locate(void) {
 
     app.hud.following = false;
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 2;
+    fakes.choice = 3;
     maps__menu(&app);
-    CHECK_STR(fakes.choice_labels[2], "My location");
+    CHECK_STR(fakes.choice_labels[3], "My location");
     CHECK(app.hud.following);
     stop();
 }
@@ -616,13 +617,13 @@ static void menu_turns_gps_off(void) {
     start();
     app.gps_available = true;
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 7u);
+    CHECK_EQ(fakes.choice_count, 8u);
     maps__locate(&app);
     gps_here(50.1, 20.1);
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 3;
+    fakes.choice = 4;
     maps__menu(&app);
-    CHECK_STR(fakes.choice_labels[3], "Turn GPS off");
+    CHECK_STR(fakes.choice_labels[4], "Turn GPS off");
     CHECK(!app.gps && !app.hud.me && !app.hud.speed && !app.hud.following);
     int reads = fakes.gps_reads;
     gps_here(50.1, 20.1);
@@ -671,7 +672,94 @@ static void gps_error_hides_location(void) {
     CHECK(!app.hud.locate_button);
     CHECK(app.hud.gps_status == NULL);
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 6u);
+    CHECK_EQ(fakes.choice_count, 7u);
+    stop();
+}
+
+static void finish_route(void) {
+    for (int i = 0; i < 10 && app.route_request.state != ROUTE_IDLE; ++i) maps__poll_route(&app);
+}
+
+static void directions_preview_steps_through_the_route(void) {
+    start();
+    fakes.width = 240;
+    fakes.height = 320;
+    maps__show_place(&app, 50.063, 19.935, "North end");
+    map_view__set(&app.view, 50.06, 19.93, 14);
+    fakes.http_body = s_route_json;
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 0; /* The pin, from the map centre, by car. */
+    maps__directions(&app);
+    finish_route();
+    CHECK(strstr(fakes.http_url, "/routed-car/route/v1/driving/19.9") != NULL);
+    CHECK(strstr(fakes.http_url, ";19.93500,50.06300?") != NULL);
+    CHECK_EQ(app.route.step_count, 3u);
+    CHECK(!app.navigating);
+    CHECK(app.hud.route == &app.route);
+    CHECK(app.hud.banner_step == &app.route.steps[0]);
+    CHECK_STR(app.hud.banner_distance, "1/3");
+    CHECK_STR(app.hud.banner_text, "Head east on Main");
+    CHECK_STR(app.hud.banner_then, "Turn left onto N1");
+    CHECK(strstr(app.hud.summary, " min") != NULL);
+    CHECK_STR(app.hud.place, "North end");
+    hud_rect_t banner = hud__banner_rect(240);
+    touch(BRUCE_INPUT_PRESS, banner.x + 10, banner.y + 10);
+    CHECK_STR(app.hud.banner_text, "Turn left onto N1");
+    CHECK_STR(app.hud.banner_then, "Arrive at the destination");
+    press(BRUCE_INPUT_KEY, BRUCE_INPUT_CODE_BACK);
+    CHECK(app.running);
+    CHECK_EQ(app.route.point_count, 0u);
+    CHECK(app.hud.banner_step == NULL);
+    CHECK(app.hud.route == NULL);
+    stop();
+}
+
+static void directions_navigate_reroute_and_arrive(void) {
+    start();
+    fakes.width = 240;
+    fakes.height = 320;
+    app.gps_available = true;
+    maps__show_place(&app, 50.063, 19.935, "North end");
+    fakes.http_body = s_route_json;
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 0; /* The pin, from my location, by car. */
+    maps__directions(&app);
+    CHECK(app.route_wait_fix);
+    CHECK(app.gps);
+    CHECK_EQ(fakes.http_calls, 0);
+    gps_here(50.06, 19.93);
+    finish_route();
+    CHECK(app.navigating);
+    CHECK(app.hud.following);
+    CHECK_STR(app.hud.banner_distance, "350 m");
+    CHECK_STR(app.hud.banner_text, "Turn left onto N1");
+    CHECK_STR(app.hud.banner_then, "Arrive at the destination");
+    gps_here(50.06, 19.9325);
+    CHECK_STR(app.hud.banner_distance, "200 m");
+    int calls = fakes.http_calls;
+    for (int i = 0; i < MAPS_OFF_ROUTE_FIXES; ++i) gps_here(50.07, 19.95);
+    CHECK_EQ(fakes.http_calls, calls + 1);
+    CHECK(strstr(fakes.http_url, "19.95000,50.07000;19.93500,50.06300") != NULL);
+    finish_route();
+    CHECK(app.navigating);
+    gps_here(50.063, 19.935);
+    CHECK(!app.navigating);
+    CHECK_EQ(app.route.point_count, 0u);
+    CHECK_STR(app.hud.hint[0], "You have arrived");
+    stop();
+}
+
+static void directions_report_no_route(void) {
+    start();
+    maps__show_place(&app, 50.063, 19.935, "North end");
+    fakes.http_status = 400;
+    fakes.http_body = "{\"code\":\"NoRoute\",\"message\":\"Impossible route\"}";
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 0;
+    maps__directions(&app);
+    finish_route();
+    CHECK_STR(fakes.message, "No route found");
+    CHECK_EQ(app.route.point_count, 0u);
     stop();
 }
 
@@ -817,6 +905,9 @@ SUITE(maps_tests,
       TEST(menu_turns_gps_off),
       TEST(gps_status_shows_progress_until_fix),
       TEST(gps_error_hides_location),
+      TEST(directions_preview_steps_through_the_route),
+      TEST(directions_navigate_reroute_and_arrive),
+      TEST(directions_report_no_route),
       TEST(app_main_draws_loads_and_exits),
       TEST(no_wifi_status_clears_when_wifi_comes_back),
       TEST(scrolling_keeps_five_downloads_and_cancels_far_ones),

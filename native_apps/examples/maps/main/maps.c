@@ -7,6 +7,7 @@
 #include "geo.h"
 #include "hud.h"
 #include "map_view.h"
+#include "route.h"
 #include "search.h"
 #include "settings.h"
 #include "tiles.h"
@@ -19,6 +20,13 @@
 #define MAPS_GPS_POLL_MS 1000
 #define MAPS_GPS_NO_DATA_MS 10000
 #define MAPS_GPS_FIX_SATELLITES 4
+#define MAPS_NAV_ZOOM 16
+/* Off the route by more than this for a few fixes in a row: route again. */
+#define MAPS_OFF_ROUTE_M 50
+#define MAPS_OFF_ROUTE_FIXES 3
+#define MAPS_REROUTE_MS 15000
+#define MAPS_ARRIVED_M 25
+#define MAPS_ARRIVED_HINT_MS 5000
 
 typedef struct {
     settings_t settings;
@@ -41,6 +49,26 @@ typedef struct {
     uint64_t gps_at;
     uint64_t gps_started_at;
     char gps_text[40];
+    /* What the running search is for. */
+    enum { MAPS_FIND_PLACE, MAPS_FIND_DESTINATION, MAPS_FIND_START } finding;
+    /* Directions: where to, from where, and how. */
+    double to_lat, to_lon;
+    char to_name[SEARCH_NAME_MAX];
+    double from_lat, from_lon;
+    bool from_gps;       /* From my location: the route is navigated live. */
+    route_profile_t profile;
+    route_request_t route_request;
+    bool route_wait_fix; /* Routing from my location once there is a fix. */
+    route_t route;       /* point_count 0 when there is none. */
+    bool navigating;
+    route_progress_t progress;
+    size_t shown_step;   /* Without GPS: the step the banner shows. */
+    int off_route_fixes;
+    uint64_t rerouted_at;
+    char banner_distance[16];
+    char banner_text[ROUTE_TEXT_MAX];
+    char banner_then[ROUTE_TEXT_MAX];
+    char summary[40];
 } maps_t;
 
 static int32_t maps__to_e6(double degrees) { return (int32_t)floor(degrees * 1000000.0 + 0.5); }
@@ -130,28 +158,41 @@ static double maps__distance_m(const maps_t *app, const search_place_t *place) {
     return 2 * 6371000.0 * asin(sqrt(a));
 }
 
-static void maps__format_distance(char *out, size_t capacity, double meters) {
-    long m = (long)(meters + 0.5);
-    if (m < 1000) snprintf(out, capacity, "%ld m", m);
-    else if (m < 10000) snprintf(out, capacity, "%ld.%ld km", m / 1000, m % 1000 / 100);
-    else snprintf(out, capacity, "%ld km", m / 1000);
+static void maps__directions_from(maps_t *app);
+static void maps__directions_mode(maps_t *app);
+
+/* A place from search: shown with a pin, or an end of the route being planned. */
+static void maps__place_found(maps_t *app, double lat, double lon, const char *name) {
+    if (app->finding == MAPS_FIND_DESTINATION) {
+        app->to_lat = lat;
+        app->to_lon = lon;
+        snprintf(app->to_name, sizeof(app->to_name), "%s", name);
+        maps__directions_from(app);
+    } else if (app->finding == MAPS_FIND_START) {
+        app->from_lat = lat;
+        app->from_lon = lon;
+        app->from_gps = false;
+        maps__directions_mode(app);
+    } else {
+        maps__show_place(app, lat, lon, name);
+    }
 }
 
 static void maps__pick_place(maps_t *app, const search_place_t *places, size_t count) {
     if (count == 1) {
-        maps__show_place(app, places[0].lat, places[0].lon, places[0].name);
+        maps__place_found(app, places[0].lat, places[0].lon, places[0].name);
         return;
     }
     bruce_dialog_choice_t choices[SEARCH_RESULTS_MAX];
     char distances[SEARCH_RESULTS_MAX][12];
     for (size_t i = 0; i < count; ++i) {
-        maps__format_distance(distances[i], sizeof(distances[i]), maps__distance_m(app, &places[i]));
+        route__format_distance(distances[i], sizeof(distances[i]), maps__distance_m(app, &places[i]));
         choices[i] = (bruce_dialog_choice_t){
             .label = places[i].name, .icon_name = "map-marker", .right_text = distances[i]};
     }
     size_t selected = 0;
     if (dialog__choice("Places", NULL, choices, count, &selected) == BRUCE_OK) {
-        maps__show_place(app, places[selected].lat, places[selected].lon, places[selected].name);
+        maps__place_found(app, places[selected].lat, places[selected].lon, places[selected].name);
     }
 }
 
@@ -168,15 +209,16 @@ static void maps__search_finished(maps_t *app, bruce_result_t result, const sear
 }
 
 /* Coordinates jump straight there; anything else asks the search server. */
-static void maps__search(maps_t *app) {
+static void maps__search_for(maps_t *app, int finding, const char *title) {
     char text[SEARCH_QUERY_MAX] = {0};
     app->dirty = true;
-    if (dialog__text_input("Search", "place or lat, lon", NULL, false, text, sizeof(text)) != BRUCE_OK) return;
+    app->finding = finding;
+    if (dialog__text_input(title, "place or lat, lon", NULL, false, text, sizeof(text)) != BRUCE_OK) return;
     double lat = 0, lon = 0;
     if (search__parse_coordinates(text, &lat, &lon)) {
         char name[SEARCH_QUERY_MAX];
         maps__coordinates_name(text, name, sizeof(name));
-        maps__show_place(app, lat, lon, name);
+        maps__place_found(app, lat, lon, name);
         return;
     }
     if (text[strspn(text, " ")] == '\0') return;
@@ -185,6 +227,8 @@ static void maps__search(maps_t *app) {
     );
     if (result != BRUCE_OK) maps__search_finished(app, result, NULL, 0);
 }
+
+static void maps__search(maps_t *app) { maps__search_for(app, MAPS_FIND_PLACE, "Search"); }
 
 static void maps__poll_search(maps_t *app) {
     if (app->search.state == SEARCH_IDLE) return;
@@ -214,9 +258,303 @@ static void maps__locate(maps_t *app) {
 }
 
 static void maps__gps_off(maps_t *app) {
+    /* The route stays, to step through by hand. */
+    if (app->navigating) app->shown_step = app->progress.next;
+    app->navigating = app->route_wait_fix = false;
     app->gps = app->locate_pending = app->hud.me = app->hud.following = app->hud.speed = false;
     app->hud.gps_status = NULL;
     app->dirty = true;
+}
+
+/* ---- Directions ------------------------------------------------------------ */
+
+static bool maps__has_route(const maps_t *app) { return app->route.point_count > 0; }
+
+static void maps__set_text(maps_t *app, char *field, size_t capacity, const char *text) {
+    if (strcmp(field, text) == 0) return;
+    snprintf(field, capacity, "%s", text);
+    app->dirty = true;
+}
+
+/* The banner and summary from the progress along the route, or the shown step without GPS. */
+static void maps__update_banner(maps_t *app) {
+    if (!maps__has_route(app)) {
+        app->hud.route = NULL;
+        app->hud.banner_step = NULL;
+        app->hud.summary = NULL;
+        return;
+    }
+    const route_t *route = &app->route;
+    size_t step = app->navigating ? app->progress.next : app->shown_step;
+    char distance[16], text[ROUTE_TEXT_MAX], then[ROUTE_TEXT_MAX] = "", length[16], time[16], summary[40];
+    double left_m = app->navigating ? app->progress.left_m : route__length_m(route);
+    double left_s = app->navigating ? app->progress.left_s : route__duration_s(route);
+    if (app->navigating) route__format_countdown(distance, sizeof(distance), app->progress.to_next_m);
+    else snprintf(distance, sizeof(distance), "%u/%u", (unsigned)step + 1, (unsigned)route->step_count);
+    route__instruction(&route->steps[step], text, sizeof(text));
+    if (step + 1 < route->step_count) route__instruction(&route->steps[step + 1], then, sizeof(then));
+    route__format_distance(length, sizeof(length), left_m);
+    route__format_duration(time, sizeof(time), left_s);
+    snprintf(summary, sizeof(summary), "%s, %s", length, time);
+    if (app->hud.banner_step != &route->steps[step]) app->dirty = true;
+    app->hud.route = route;
+    app->hud.banner_step = &route->steps[step];
+    maps__set_text(app, app->banner_distance, sizeof(app->banner_distance), distance);
+    maps__set_text(app, app->banner_text, sizeof(app->banner_text), text);
+    maps__set_text(app, app->banner_then, sizeof(app->banner_then), then);
+    maps__set_text(app, app->summary, sizeof(app->summary), summary);
+    app->hud.banner_distance = app->banner_distance;
+    app->hud.banner_text = app->banner_text;
+    app->hud.banner_then = app->banner_then[0] != '\0' ? app->banner_then : NULL;
+    app->hud.summary = app->summary;
+}
+
+static void maps__end_route(maps_t *app) {
+    route__cancel(&app->route_request);
+    route__free(&app->route);
+    app->navigating = app->route_wait_fix = false;
+    app->hud.route = NULL;
+    maps__update_banner(app);
+    app->dirty = true;
+}
+
+/* Zooms so the whole route fits on screen, centred on it. */
+static void maps__fit_route(maps_t *app) {
+    geo_point_t low = app->route.points[0], high = low;
+    for (size_t i = 1; i < app->route.point_count; ++i) {
+        geo_point_t p = app->route.points[i];
+        if (p.x < low.x) low.x = p.x;
+        if (p.y < low.y) low.y = p.y;
+        if (p.x > high.x) high.x = p.x;
+        if (p.y > high.y) high.y = p.y;
+    }
+    int width = display__width() * 3 / 4, height = display__height() / 2;
+    int zoom = ROUTE_ZOOM;
+    while (zoom > GEO_MIN_ZOOM &&
+           (((high.x - low.x) >> (ROUTE_ZOOM - zoom)) > width || ((high.y - low.y) >> (ROUTE_ZOOM - zoom)) > height)) {
+        zoom--;
+    }
+    if (zoom > GEO_MAX_ZOOM - 1) zoom = GEO_MAX_ZOOM - 1;
+    app->view.zoom = zoom;
+    app->view.center.x = (int32_t)(((int64_t)low.x + high.x) / 2) >> (ROUTE_ZOOM - zoom);
+    app->view.center.y = (int32_t)(((int64_t)low.y + high.y) / 2) >> (ROUTE_ZOOM - zoom);
+}
+
+static void maps__show_step(maps_t *app, size_t step) {
+    if (!maps__has_route(app) || step >= app->route.step_count) return;
+    app->shown_step = step;
+    geo_point_t point = app->route.points[app->route.steps[step].point];
+    int zoom = app->view.zoom > MAPS_NAV_ZOOM ? app->view.zoom : MAPS_NAV_ZOOM;
+    app->view.zoom = zoom;
+    app->view.center.x = point.x >> (ROUTE_ZOOM - zoom);
+    app->view.center.y = point.y >> (ROUTE_ZOOM - zoom);
+    app->hud.following = false;
+    maps__update_banner(app);
+    app->dirty = true;
+}
+
+static void maps__route_failed(maps_t *app, bruce_result_t result) {
+    app->dirty = true;
+    /* A failed reroute keeps the old route; the next fix off it tries again. */
+    if (app->navigating) return;
+    const char *message = result == BRUCE_ERR_NOT_FOUND ? "No route found"
+                          : net__is_online()            ? "Routing failed, try again later"
+                                                        : "No internet connection";
+    dialog__message(BRUCE_DIALOG_WARNING, "Directions", message);
+}
+
+static void maps__route_ready(maps_t *app, route_t *route) {
+    bool rerouted = app->navigating;
+    route__free(&app->route);
+    app->route = *route;
+    app->progress = (route_progress_t){0};
+    app->off_route_fixes = 0;
+    app->shown_step = 0;
+    app->hud.pin = true;
+    app->hud.pin_lat = app->to_lat;
+    app->hud.pin_lon = app->to_lon;
+    snprintf(app->place, sizeof(app->place), "%s", app->to_name);
+    app->hud.place = app->place;
+    app->navigating = app->from_gps && app->gps;
+    if (app->navigating) {
+        route__track(&app->route, app->hud.me_lat, app->hud.me_lon, 0, &app->progress);
+        if (!rerouted) {
+            int zoom = app->view.zoom > MAPS_NAV_ZOOM ? app->view.zoom : MAPS_NAV_ZOOM;
+            map_view__set(&app->view, app->hud.me_lat, app->hud.me_lon, zoom);
+            app->hud.following = true;
+        }
+    } else {
+        maps__fit_route(app);
+        app->hud.following = false;
+    }
+    maps__update_banner(app);
+    app->dirty = true;
+}
+
+static void maps__route_request(maps_t *app) {
+    if (app->from_gps) {
+        app->from_lat = app->hud.me_lat;
+        app->from_lon = app->hud.me_lon;
+    }
+    bruce_result_t result = route__start(&app->route_request, app->settings.route_url, app->profile, app->from_lat,
+                                         app->from_lon, app->to_lat, app->to_lon);
+    if (result != BRUCE_OK) maps__route_failed(app, result);
+    app->dirty = true;
+}
+
+/* From my location waits for the first fix. */
+static void maps__route_start(maps_t *app) {
+    if (app->from_gps && !app->hud.me) {
+        if (!app->gps) {
+            app->gps = true;
+            app->gps_at = app->gps_started_at = 0;
+            app->gps_text[0] = '\0';
+        }
+        app->route_wait_fix = true;
+        app->dirty = true;
+        return;
+    }
+    maps__route_request(app);
+}
+
+static void maps__poll_route(maps_t *app) {
+    if (app->route_request.state == ROUTE_IDLE) return;
+    route_t route;
+    bruce_result_t result = route__poll(&app->route_request, &route);
+    if (result == BRUCE_ERR_BUSY) return;
+    if (result == BRUCE_OK) maps__route_ready(app, &route);
+    else maps__route_failed(app, result);
+}
+
+static void maps__directions_mode(maps_t *app) {
+    static const char *const labels[ROUTE_PROFILE_COUNT] = {"Car", "Bike", "Walk"};
+    bruce_dialog_choice_t choices[ROUTE_PROFILE_COUNT];
+    for (int i = 0; i < ROUTE_PROFILE_COUNT; ++i) choices[i] = (bruce_dialog_choice_t){.label = labels[i]};
+    size_t selected = app->profile;
+    app->dirty = true;
+    if (dialog__choice("Travel by", NULL, choices, ROUTE_PROFILE_COUNT, &selected) != BRUCE_OK) return;
+    app->profile = (route_profile_t)selected;
+    maps__route_start(app);
+}
+
+static void maps__directions_from(maps_t *app) {
+    enum { FROM_ME, FROM_CENTRE, FROM_SEARCH };
+    bruce_dialog_choice_t choices[3];
+    int actions[3];
+    size_t count = 0;
+    if (app->gps_available) {
+        choices[count] = (bruce_dialog_choice_t){.label = "My location", .icon_name = "crosshairs-gps"};
+        actions[count++] = FROM_ME;
+    }
+    choices[count] = (bruce_dialog_choice_t){.label = "Map centre", .icon_name = "crosshairs"};
+    actions[count++] = FROM_CENTRE;
+    choices[count] = (bruce_dialog_choice_t){.label = "Search", .icon_name = "magnify"};
+    actions[count++] = FROM_SEARCH;
+    size_t selected = 0;
+    app->dirty = true;
+    if (dialog__choice("From", NULL, choices, count, &selected) != BRUCE_OK) return;
+    app->from_gps = actions[selected] == FROM_ME;
+    if (actions[selected] == FROM_SEARCH) {
+        maps__search_for(app, MAPS_FIND_START, "From");
+        return;
+    }
+    if (actions[selected] == FROM_CENTRE) map_view__center(&app->view, &app->from_lat, &app->from_lon);
+    maps__directions_mode(app);
+}
+
+/* Where to: the pinned place, the map centre, or a search. */
+static void maps__directions(maps_t *app) {
+    enum { TO_PIN, TO_CENTRE, TO_SEARCH };
+    char pin_label[48] = "";
+    bruce_dialog_choice_t choices[3];
+    int actions[3];
+    size_t count = 0;
+    if (app->hud.pin && app->hud.place != NULL) {
+        snprintf(pin_label, sizeof(pin_label), "%.*s", (int)strcspn(app->hud.place, ","), app->hud.place);
+        choices[count] = (bruce_dialog_choice_t){.label = pin_label, .icon_name = "map-marker"};
+        actions[count++] = TO_PIN;
+    }
+    choices[count] = (bruce_dialog_choice_t){.label = "Search", .icon_name = "magnify"};
+    actions[count++] = TO_SEARCH;
+    choices[count] = (bruce_dialog_choice_t){.label = "Map centre", .icon_name = "crosshairs"};
+    actions[count++] = TO_CENTRE;
+    size_t selected = 0;
+    app->dirty = true;
+    if (dialog__choice("To", NULL, choices, count, &selected) != BRUCE_OK) return;
+    if (actions[selected] == TO_SEARCH) {
+        maps__search_for(app, MAPS_FIND_DESTINATION, "To");
+        return;
+    }
+    if (actions[selected] == TO_PIN) {
+        app->to_lat = app->hud.pin_lat;
+        app->to_lon = app->hud.pin_lon;
+        snprintf(app->to_name, sizeof(app->to_name), "%s", app->hud.place);
+    } else {
+        map_view__center(&app->view, &app->to_lat, &app->to_lon);
+        snprintf(app->to_name, sizeof(app->to_name), "Map centre");
+    }
+    maps__directions_from(app);
+}
+
+/* Every step with the distance to the one after; picking one shows it. */
+static void maps__directions_list(maps_t *app) {
+    const route_t *route = &app->route;
+    size_t count = route->step_count;
+    bruce_dialog_choice_t *choices = memory__calloc(count, sizeof(*choices));
+    char (*texts)[ROUTE_TEXT_MAX] = memory__calloc(count, ROUTE_TEXT_MAX);
+    char (*distances)[12] = memory__calloc(count, 12);
+    app->dirty = true;
+    if (choices == NULL || texts == NULL || distances == NULL) {
+        dialog__message(BRUCE_DIALOG_ERROR, "Directions", "Not enough memory");
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            route__instruction(&route->steps[i], texts[i], ROUTE_TEXT_MAX);
+            if (i + 1 < count) {
+                float meters = route->along[route->steps[i + 1].point] - route->along[route->steps[i].point];
+                route__format_distance(distances[i], 12, meters);
+            }
+            choices[i] = (bruce_dialog_choice_t){.label = texts[i], .right_text = distances[i]};
+        }
+        size_t selected = app->navigating ? app->progress.next : app->shown_step;
+        if (dialog__choice("Directions", NULL, choices, count, &selected) == BRUCE_OK) {
+            if (app->navigating) {
+                geo_point_t point = route->points[route->steps[selected].point];
+                app->view.center.x = point.x >> (ROUTE_ZOOM - app->view.zoom);
+                app->view.center.y = point.y >> (ROUTE_ZOOM - app->view.zoom);
+                app->hud.following = false;
+            } else {
+                maps__show_step(app, selected);
+            }
+        }
+    }
+    memory__free(choices);
+    memory__free(texts);
+    memory__free(distances);
+}
+
+/* Each fix: where along the route, arrival, and a new route when off it for a while. */
+static void maps__navigate(maps_t *app, uint64_t now) {
+    if (app->route_wait_fix) {
+        app->route_wait_fix = false;
+        maps__route_request(app);
+        return;
+    }
+    if (!app->navigating) return;
+    route_progress_t progress;
+    route__track(&app->route, app->hud.me_lat, app->hud.me_lon, app->progress.segment, &progress);
+    if (progress.left_m < MAPS_ARRIVED_M && progress.off_m < MAPS_ARRIVED_M) {
+        maps__end_route(app);
+        maps__show_hint(app, "map-marker", "You have arrived", NULL, MAPS_ARRIVED_HINT_MS);
+        return;
+    }
+    app->off_route_fixes = progress.off_m > MAPS_OFF_ROUTE_M ? app->off_route_fixes + 1 : 0;
+    if (app->off_route_fixes >= MAPS_OFF_ROUTE_FIXES && app->route_request.state == ROUTE_IDLE &&
+        (app->rerouted_at == 0 || now - app->rerouted_at >= MAPS_REROUTE_MS)) {
+        app->rerouted_at = now;
+        maps__route_request(app);
+    }
+    app->progress = progress;
+    maps__update_banner(app);
 }
 
 /* Steps towards a fix: data from the receiver, the time, then enough satellites. */
@@ -282,6 +620,7 @@ static void maps__poll_gps(maps_t *app) {
     app->hud.speed_kmh = speed;
     if (app->locate_pending) maps__locate(app);
     else if (app->hud.following) maps__follow(app, after);
+    maps__navigate(app, now);
 }
 
 static void maps__toggle_online(maps_t *app) {
@@ -295,13 +634,16 @@ static void maps__toggle_big(maps_t *app) {
 }
 
 static void maps__menu(maps_t *app) {
-    enum { NAV_MODE, SEARCH, LOCATE, GPS_OFF, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
+    enum { NAV_MODE, SEARCH, DIRECTIONS, STEPS, END_ROUTE, LOCATE, GPS_OFF, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
     hud_nav_mode_t next_mode = maps__next_nav_mode(app);
     char nav_label[32];
     snprintf(nav_label, sizeof(nav_label), "Change to %s", s_nav_names[next_mode]);
     const bruce_dialog_choice_t all[] = {
         [NAV_MODE] = {.label = nav_label, .icon_name = hud__nav_icon(next_mode)},
         [SEARCH] = {.label = "Search", .icon_name = "magnify"},
+        [DIRECTIONS] = {.label = "Directions", .icon_name = "compass"},
+        [STEPS] = {.label = "All directions", .icon_name = "file-document"},
+        [END_ROUTE] = {.label = "End route", .icon_name = "close"},
         [LOCATE] = {.label = "My location", .icon_name = "crosshairs-gps"},
         [GPS_OFF] = {.label = "Turn GPS off", .icon_name = "crosshairs"},
         [CLEAR_PIN] = {.label = "Clear pin", .icon_name = "map-marker"},
@@ -316,6 +658,7 @@ static void maps__menu(maps_t *app) {
     size_t count = 0;
     for (int i = 0; i < (int)(sizeof(all) / sizeof(all[0])); ++i) {
         if (i == CLEAR_PIN && !app->hud.pin) continue;
+        if ((i == STEPS || i == END_ROUTE) && !maps__has_route(app)) continue;
         if (i == LOCATE && !app->gps_available) continue;
         if (i == GPS_OFF && !app->gps) continue;
         /* Keyboards and touch screens pan and zoom directly; the Prev/Next mode is for button boards. */
@@ -328,6 +671,9 @@ static void maps__menu(maps_t *app) {
         switch (actions[selected]) {
             case NAV_MODE: maps__set_nav_mode(app, next_mode, true); break;
             case SEARCH: maps__search(app); break;
+            case DIRECTIONS: maps__directions(app); break;
+            case STEPS: maps__directions_list(app); break;
+            case END_ROUTE: maps__end_route(app); break;
             case LOCATE: maps__locate(app); break;
             case GPS_OFF: maps__gps_off(app); break;
             case CLEAR_PIN: maps__clear_pin(app); break;
@@ -368,6 +714,8 @@ static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
         else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->x, event->y)) maps__zoom(app, -1);
         else if (app->hud.locate_button && maps__hit_button(HUD_BUTTON_LOCATE, event->x, event->y)) {
             maps__locate(app);
+        } else if (maps__has_route(app) && maps__hit(hud__banner_rect(display__width()), event->x, event->y)) {
+            if (!app->navigating) maps__show_step(app, (app->shown_step + 1) % app->route.step_count);
         } else if (maps__hit(search, event->x, event->y)) maps__search(app);
         else app->touch_on_button = false;
     } else if (event->action == BRUCE_INPUT_CHANGE && !app->touch_on_button) {
@@ -389,7 +737,9 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
     switch (event->code) {
         case BRUCE_INPUT_CODE_BACK:
             if (app->search.state != SEARCH_IDLE) search__cancel(&app->search);
-            else app->running = false;
+            else if (app->route_request.state != ROUTE_IDLE || app->route_wait_fix || maps__has_route(app)) {
+                maps__end_route(app);
+            } else app->running = false;
             app->dirty = true;
             break;
         case BRUCE_INPUT_CODE_UP: maps__pan(app, 0, -step_y); break;
@@ -413,14 +763,21 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
 static void maps__update_status(maps_t *app, size_t loading) {
     const char *before = app->hud.status;
     bool searching = app->search.state == SEARCH_RUNNING;
-    bool connecting = app->search.state == SEARCH_CONNECTING || (loading == 0 && app->tiles.connecting);
+    bool routing = app->route_request.state == ROUTE_RUNNING;
+    bool connecting = app->search.state == SEARCH_CONNECTING || app->route_request.state == ROUTE_CONNECTING ||
+                      (loading == 0 && app->tiles.connecting);
     bool offline = !searching && !connecting && loading == 0 && app->tiles.network_down;
     app->hud.status = searching    ? "Searching"
+                      : routing    ? "Routing"
                       : connecting ? "Connecting"
                       : loading > 0 ? "Loading"
                       : offline    ? "Offline"
                                    : NULL;
-    app->hud.status_icon = searching ? "magnify" : connecting ? "web" : offline ? "wifi-cancel" : NULL;
+    app->hud.status_icon = searching    ? "magnify"
+                           : routing    ? "compass"
+                           : connecting ? "web"
+                           : offline    ? "wifi-cancel"
+                                        : NULL;
     if (app->hud.status != before) app->dirty = true;
 }
 
@@ -477,6 +834,7 @@ static void maps__run(maps_t *app) {
         while (app->running && input__poll(&event) == BRUCE_OK) maps__handle(app, &event);
         maps__expire_hint(app);
         maps__poll_search(app);
+        maps__poll_route(app);
         maps__poll_gps(app);
         if (tiles__check_network(&app->tiles)) app->dirty = true;
         if (display__viewport_changed()) app->dirty = true;
@@ -537,6 +895,7 @@ int app_main(int argc, char **argv) {
 
     maps__save_view(app);
     search__cancel(&app->search);
+    maps__end_route(app);
     tiles__deinit(&app->tiles);
     memory__free(app);
     return 0;

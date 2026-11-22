@@ -29,7 +29,8 @@ make -C native_apps/examples/maps/test
 Holding Select, or the first menu item *Change to ...*, switches what
 Prev/Next do: zoom, then up/down, then left/right. A short hint on the map
 confirms the new mode, e.g. "Move up/down", and the zoom badge shows an
-arrow icon while Prev/Next pan. The menu also has *Search*, *Clear pin*
+arrow icon while Prev/Next pan. The menu also has *Search*, *Directions*,
+*All directions* and *End route* (while there is a route), *Clear pin*
 (while a pin is shown), *Online tiles* on/off, *Exit* and *Back*. On touch
 screens the +/- buttons appear after the first touch.
 
@@ -63,6 +64,31 @@ screen. The map stays usable while it runs; Back cancels it. Pick one of the
 results (the distance from the screen centre is on the right) and the map
 jumps there and drops a pin. Typing coordinates such as `50.0614, 19.9372`
 jumps straight there without the network.
+
+## Directions
+
+*Directions* in the menu plans a route in three questions: *To* (the pinned
+place, a search, or the map centre), *From* (*My location* on boards with
+GPS, the map centre, or a search) and *Travel by* (car, bike or walk). The
+route comes from the [OSRM](https://project-osrm.org/) servers FOSSGIS runs
+at `routing.openstreetmap.de`, one per travel mode, and needs the network
+only to plan it. It is drawn on the map (blue, or black on e-paper), with a
+pin at the destination.
+
+From *My location* the app navigates. The banner at the top shows the next
+manoeuvre as an arrow, the distance to it and the instruction, e.g. "350 m,
+Turn left onto Grodzka"; the line under it is the manoeuvre after that
+("Then ..."), and the box at the bottom the distance and time left. The map
+follows the position as with *My location*. More than 50 m off the route
+for three fixes in a row plans a new route from where you are (at most
+every 15 s), and within 25 m of the destination "You have arrived" ends it.
+The distance is rounded (to 10 m, 50 m below 1 km, 100 m above) so the
+banner, and an e-paper screen, change less often.
+
+From anywhere else the whole route fits on screen and the banner shows the
+steps one by one, starting with the first ("1/12"); tap the banner for the
+next one. *All directions* lists every step with its length; picking one
+shows it on the map. *End route*, or Back, removes the route.
 
 ## Tiles
 
@@ -103,6 +129,7 @@ Stored with `app_config` in the app's own config file:
 | `tiles.dir`    | `/sdcard/maps/tiles`                              |
 | `tiles.url`    | `https://tile.openstreetmap.org/{z}/{x}/{y}.png`  |
 | `search.url`   | `https://nominatim.openstreetmap.org/search`      |
+| `route.url`    | `https://routing.openstreetmap.de`                |
 
 The default tile server is fine for personal use, but its
 [usage policy](https://operations.osmfoundation.org/policies/tiles/) forbids
@@ -110,5 +137,9 @@ bulk downloading and heavy app traffic. Point `tiles.url` at your own server
 or a provider with an API key before distributing the app. The same goes for
 `search.url`: the public Nominatim allows one search a second and no
 autocomplete, see its [usage policy](https://operations.osmfoundation.org/policies/nominatim/).
+`route.url` is an OSRM server laid out like FOSSGIS's, with
+`/routed-car`, `/routed-bike` and `/routed-foot` under it. FOSSGIS's
+[usage policy](https://routing.openstreetmap.de/about.html) asks for a valid
+user agent, at most one request a second, and no heavy use.
 
 Map data © OpenStreetMap contributors.

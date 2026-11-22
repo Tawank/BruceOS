@@ -197,6 +197,19 @@ bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r, bruce_displ
     return BRUCE_OK;
 }
 
+bruce_result_t display__draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, bruce_display_color_t color) {
+    (void)fakes__record(FAKE_LINE, x0, y0, x1, y1, color);
+    return BRUCE_OK;
+}
+
+bruce_result_t display__fill_triangle(
+    int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, bruce_display_color_t color
+) {
+    (void)x1, (void)y1, (void)x2, (void)y2;
+    (void)fakes__record(FAKE_TRIANGLE, x0, y0, 0, 0, color);
+    return BRUCE_OK;
+}
+
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
     (void)color;
     return BRUCE_OK;
@@ -375,7 +388,9 @@ void http__response_free(bruce_http_response_t *response) {
 
 /* ---- memory ------------------------------------------------------------- */
 
+void *memory__malloc(size_t size) { return malloc(size); }
 void *memory__calloc(size_t count, size_t size) { return calloc(count, size); }
+void *memory__realloc(void *ptr, size_t size) { return realloc(ptr, size); }
 void memory__free(void *ptr) { free(ptr); }
 
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats) {

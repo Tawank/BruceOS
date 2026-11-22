@@ -25,6 +25,8 @@ typedef enum {
     FAKE_STRING,
     FAKE_ICON, /* text holds the icon name */
     FAKE_CIRCLE, /* x, y centre; w radius */
+    FAKE_LINE,   /* x, y to w, h */
+    FAKE_TRIANGLE,
 } fake_draw_kind_t;
 
 typedef struct {

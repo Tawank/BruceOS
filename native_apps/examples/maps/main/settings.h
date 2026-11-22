@@ -12,6 +12,7 @@ typedef struct {
     char tile_dir[96];
     char tile_url[128];
     char search_url[128];
+    char route_url[128];
 } settings_t;
 
 void settings__load(settings_t *settings);
