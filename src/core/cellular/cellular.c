@@ -25,6 +25,9 @@
 #if CONFIG_BRUCE_CELLULAR_ENABLED
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_log.h"
+
+#define TAG "cellular"
 #endif
 
 /* ---- Parser (no I/O) ---- */
@@ -125,12 +128,15 @@ static void cellular__clcc(cellular_model_t *model, const char *values, uint64_t
     }
     model->clcc_seen = true;
     if (status == 5) return; /* A second, waiting call. */
+    if (model->call == BRUCE_CALL_NONE) {
+        cellular__start_call(model, direction == 1, now_ms, cellular__utc_now());
+        /* A call first seen here (its RING lost, e.g. while asleep) still rings. */
+        if (direction == 1 && status == 4) model->ring = true;
+    }
     char number[BRUCE_CELLULAR_NUMBER_MAX];
     if (cellular__quoted(values, number, sizeof(number)) && number[0] != '\0') {
         snprintf(model->number, sizeof(model->number), "%s", number);
     }
-    if (model->call == BRUCE_CALL_NONE)
-        cellular__start_call(model, direction == 1, now_ms, cellular__utc_now());
     model->incoming = direction == 1;
     switch (status) {
         case 0:
@@ -551,7 +557,7 @@ static uint32_t s_message_sequence;
 /* Messages on the SIM and the message sequence when the device went to sleep. */
 static int s_sleep_sms_used;
 static uint32_t s_sleep_sequence;
-static volatile bool s_check_sms;
+static volatile bool s_after_sleep;
 static char s_line[CELLULAR__LINE_MAX];
 static size_t s_line_length;
 
@@ -741,16 +747,18 @@ static bool cellular__in_call(void) {
     return in_call;
 }
 
-static void cellular__poll_call(void) {
+/* Returns false when the modem didn't answer. */
+static bool cellular__poll_call(void) {
     cellular__lock();
     s_model.clcc_seen = false;
     cellular__unlock();
-    if (!cellular__command("AT+CLCC", 2000)) return;
+    if (!cellular__command("AT+CLCC", 2000)) return false;
     bruce_cellular_call_record_t record;
     cellular__lock();
     bool ended = cellular__clcc_done(&s_model, cellular__now(), &record);
     cellular__unlock();
     if (ended) cellular__log_call(&record);
+    return true;
 }
 
 static void cellular__ussd_request(cellular__request_t *request) {
@@ -910,11 +918,18 @@ static void cellular__sms_arrived(void) {
     notification__push(text, BRUCE_NOTIFICATION_DURATION_MAX_MS);
 }
 
-/* The +CMTI line can be lost while the device sleeps: RI woke it, but the UART
- * was stopped. A message count above the one before sleep means a new text. */
-static void cellular__sms_check(void) {
-    if (!s_check_sms) return;
-    s_check_sms = false;
+/* Lines the modem sent while the device slept are lost, since the UART was
+ * stopped: ask for calls (a ringing one launches the phone app) and for the
+ * message count, where one above the count before sleep means a new text. */
+static void cellular__resync(void) {
+    if (!s_after_sleep) return;
+    s_after_sleep = false;
+    uart_flush_input(CELLULAR__PORT);
+    s_line_length = 0;
+    if (!cellular__poll_call()) {
+        ESP_LOGW(TAG, "modem did not answer AT+CLCC after sleep");
+        return;
+    }
     if (!cellular__command("AT+CPMS?", 3000)) return;
     cellular__lock();
     bool missed = s_model.sms_used > s_sleep_sms_used && s_model.sms_index == 0 &&
@@ -983,13 +998,13 @@ static void cellular__session(void) {
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
         cellular__sms_arrived();
-        cellular__sms_check();
+        cellular__resync();
         cellular__update_status_icon();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
         if (now - polled_at >= (in_call ? CELLULAR__POLL_CALL_MS : CELLULAR__POLL_IDLE_MS)) {
             if (in_call) {
-                cellular__poll_call();
+                (void)cellular__poll_call();
             } else {
                 cellular__query_network();
             }
@@ -1155,8 +1170,9 @@ int cellular__sleep_prepare(void) {
 }
 
 void cellular__sleep_done(bool ring) {
-    if (!ring || s_task == NULL) return;
-    s_check_sms = true;
+    if (s_task == NULL || !s_alive) return;
+    if (ring) ESP_LOGW(TAG, "woke by the modem's RI");
+    s_after_sleep = true;
     xTaskNotifyGive(s_task);
 }
 

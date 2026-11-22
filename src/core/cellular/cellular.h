@@ -90,5 +90,6 @@ void cellular__start(void);
 
 /* Before light sleep: the modem's RI GPIO to wake on, or -1. */
 int cellular__sleep_prepare(void);
-/* After light sleep; ring is whether RI woke the device. */
+/* After light sleep, whatever woke it: asks the modem for calls and messages,
+ * whose notifications may have been lost. `ring`: RI was low on waking. */
 void cellular__sleep_done(bool ring);

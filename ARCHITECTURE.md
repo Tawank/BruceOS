@@ -492,9 +492,10 @@ line and SMS parsers are pure and covered by the `cellular/parse` and
 
 `device__sleep()` also wakes on the modem's RI pin (`BRUCE_CELLULAR_RI_GPIO`,
 GPIO 7 on the T-Deck MAX; `AT+CFGRI=1` makes RI pulse on calls and texts).
-A call keeps sending `RING`, so the woken device picks it up. A `+CMTI` sent
-while the UART was stopped can be lost, so after an RI wake Core compares the
-SIM's message count with the one before sleep and announces a missed text.
+Lines sent while the UART was stopped are lost, so after every wake Core asks
+the modem: `AT+CLCC`, where an incoming call first seen there rings like one
+announced by `RING`, and `AT+CPMS?`, where a message count above the one
+before sleep announces a missed text.
 
 ### Clock and time
 

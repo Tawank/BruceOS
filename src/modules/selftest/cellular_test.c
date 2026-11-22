@@ -50,6 +50,13 @@ bool selftest__run_cellular_parse_case(void) {
     bool ended = cellular__clcc_done(&model, 52000, &record) && record.result == BRUCE_CALL_RESULT_ANSWERED &&
                  record.seconds == 30 && !record.incoming;
 
+    /* An incoming call first seen in +CLCC (its RING lost) still rings. */
+    cellular_model_t woken;
+    cellular__model_reset(&woken);
+    selftest__cellular_feed(&woken, "+CLCC: 1,1,4,0,0,\"+48600100200\",145", 30000);
+    bool clcc_ring = woken.call == BRUCE_CALL_INCOMING && woken.ring && strcmp(woken.number, "+48600100200") == 0;
+    ringing = ringing && clcc_ring;
+
     /* USSD in UCS2. */
     selftest__cellular_feed(&model, "+CUSD: 0,\"0053016B0061\",72", 0);
     bool ussd = model.ussd_done && strcmp(
