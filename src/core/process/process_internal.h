@@ -113,6 +113,8 @@ typedef struct process__record {
     /* Zero means this process follows the foreground/background task priority. */
     uint32_t configured_priority;
     process__environment_t environment;
+    /* The process's LVGL state (core/lvgl/lvgl_port.c), NULL until lvgl__begin(). */
+    void *lvgl;
     EventGroupHandle_t events;
     struct process__record *previous;
     struct process__record *next;

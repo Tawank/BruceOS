@@ -197,6 +197,9 @@ def write_elf_project(module, project_dir):
         "    REQUIRES " + " ".join(cmake_quote(value) for value in module.component_dependencies),
         ")",
     ]
+    # Every module may use LVGL from the firmware (native_apps/lvgl.cmake).
+    component.append(f"include({cmake_quote(REPO_ROOT / 'native_apps' / 'lvgl.cmake')})")
+    component.append("bruce_use_lvgl(${COMPONENT_LIB})")
     definitions = (*module.definitions, f"{module.entry_point}=app_main")
     if definitions:
         component.append("target_compile_definitions(${COMPONENT_LIB} PRIVATE " + " ".join(cmake_quote(v) for v in definitions) + ")")

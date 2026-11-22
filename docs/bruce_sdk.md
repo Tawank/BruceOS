@@ -40,6 +40,7 @@
 | [`input.h`](#inputh) | Keyboard, button, touch, and encoder event queue. |
 | [`ir.h`](#irh) | Infrared sending and receiving. |
 | [`launcher.h`](#launcherh) | Programmatic access to the launcher's menu tree. |
+| [`lvgl.h`](#lvglh) | LVGL for apps. |
 | [`manifest.h`](#manifesth) | App manifest parsing. |
 | [`memory.h`](#memoryh) | Memory allocation (RAM, PSRAM, swap). |
 | [`net.h`](#neth) | IPv4 address text parsing and formatting. |
@@ -14283,6 +14284,110 @@ disconnect it from the tree).
 ### Returns
 
 `bruce_result_t`
+
+
+---
+
+# `lvgl.h`
+
+**LVGL for apps.**
+
+@file
+Each process gets its own LVGL: its own objects, styles, timers and input,
+drawn into the process's viewport, so several apps can show LVGL at once
+(the process preview, split views). Call every lv_* function from the task
+that called lvgl__begin(). Memory comes from the process and is freed when
+it exits. The configuration is core_sdk/lvgl/lv_conf.h.
+
+A typical loop:
+
+    lvgl__begin();
+    ... create widgets on lv_screen_active() ...
+    while (running) {
+        bruce_input_event_t event;
+        while (input__poll(&event) == BRUCE_OK) {
+            if (!handled_by_app(&event)) lvgl__input(&event);
+        }
+        runtime__delay(lvgl__step());
+    }
+    lvgl__end();
+
+---
+
+## lvgl__begin()
+
+```c
+bruce_result_t lvgl__begin(void);
+```
+
+Sets up LVGL for the calling process.
+
+Creates a display the size of the process's viewport with Bruce's theme
+(the mono theme on e-paper), a keypad whose keys go to the default group
+(lv_group_get_default()), and a pointer for touch screens. BRUCE_OK when
+already set up.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## lvgl__input()
+
+```c
+void lvgl__input(const bruce_input_event_t *event);
+```
+
+Hands an input event to LVGL.
+
+Arrows, Select (Enter), Back (Esc), Prev/Next (focus) and typed characters
+go to the keypad; touches go to the pointer.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `event` | `const bruce_input_event_t *` |  |
+
+### Returns
+
+`void`
+
+
+---
+
+## lvgl__step()
+
+```c
+uint32_t lvgl__step(void);
+```
+
+Runs LVGL's timers and draws what changed.
+
+Follows viewport changes (moved, resized, shown again) and skips drawing
+while the process is hidden. Returns how many ms LVGL can wait before the
+next call.
+
+### Returns
+
+`uint32_t`
+
+
+---
+
+## lvgl__end()
+
+```c
+void lvgl__end(void);
+```
+
+Frees the calling process's LVGL; lvgl__begin() may follow again.
+
+### Returns
+
+`void`
 
 
 ---

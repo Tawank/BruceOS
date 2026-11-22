@@ -35,4 +35,9 @@ elseif(BRUCE_BUILD_DIR_PARENT_NAME STREQUAL "build-board")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# LVGL reads only src/core_sdk/lvgl/lv_conf.h, never ESP-IDF's Kconfig, so
+# apps built against the same file get the same configuration.
+idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_CURRENT_LIST_DIR}/src/core_sdk/lvgl" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "LV_KCONFIG_IGNORE" APPEND)
 project(BruceIDF)

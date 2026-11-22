@@ -13,6 +13,7 @@
 #include "core_sdk/runtime.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define CLOCK_GUI__MENU_HINT_MS 5000u
 #define CLOCK_GUI__IDLE_POLL_MS 100u
@@ -23,13 +24,11 @@
 
 typedef struct {
     clock_model_t model;
-    clock_ui_t ui;
+    clock_view_t view;
     clock_overlay_t overlay;
     clock_screen_t screen;
     bool menu_open;
     uint64_t started_ms;
-    uint32_t drawn_signature;
-    bool has_drawn;
     bool backgrounded;
 } clock_gui_t;
 
@@ -63,6 +62,9 @@ static void clock_gui__load_alarms(clock_model_t *model, const clock_now_t *now)
     }
 }
 
+/* A Core dialog drew over the viewport; LVGL paints it all again. */
+static void clock_gui__repaint(void) { lv_obj_invalidate(lv_screen_active()); }
+
 static void clock_gui__announce(const clock_event_t *event) {
     char text[40];
     char formatted[16];
@@ -76,6 +78,7 @@ static void clock_gui__announce(const clock_event_t *event) {
     }
     if (!process__is_background()) (void)dialog__message(BRUCE_DIALOG_WARNING, "Clock", text);
     (void)input__flush();
+    clock_gui__repaint();
 }
 
 static clock_scene_t clock_gui__scene(const clock_gui_t *gui, const clock_now_t *now) {
@@ -92,8 +95,6 @@ static clock_scene_t clock_gui__scene(const clock_gui_t *gui, const clock_now_t 
 static void clock_gui__show_screen(clock_gui_t *gui, clock_screen_t screen, bool menu_open) {
     gui->screen = screen;
     gui->menu_open = menu_open;
-    gui->ui.focus = 0;
-    gui->ui.scroll = 0;
 }
 
 static void clock_gui__add_custom_timer(clock_gui_t *gui) {
@@ -102,6 +103,7 @@ static void clock_gui__add_custom_timer(clock_gui_t *gui) {
         (void)clock_model__add_timer(&gui->model, seconds, runtime__now());
     }
     (void)input__flush();
+    clock_gui__repaint();
 }
 
 static void clock_gui__add_alarm(clock_gui_t *gui, const clock_now_t *now) {
@@ -112,6 +114,7 @@ static void clock_gui__add_alarm(clock_gui_t *gui, const clock_now_t *now) {
         clock_gui__save_alarms(&gui->model);
     }
     (void)input__flush();
+    clock_gui__repaint();
 }
 
 /* Returns true when the app should exit. */
@@ -121,13 +124,16 @@ static bool clock_gui__close(clock_gui_t *gui) {
     return false;
 }
 
-static bool clock_gui__activate(clock_gui_t *gui, const clock_item_t *item, const clock_now_t *now) {
+/* Runs what a click asked for, outside LVGL, since dialogs block. */
+static bool clock_gui__activate(clock_gui_t *gui, clock_action_t action, int arg, const clock_now_t *now) {
     uint64_t now_ms = runtime__now();
-    size_t index = (size_t)item->arg;
-    switch ((clock_action_t)item->action) {
-    case CLOCK_ACTION_GO_SCREEN: clock_gui__show_screen(gui, (clock_screen_t)item->arg, false); break;
+    size_t index = (size_t)arg;
+    switch (action) {
+    case CLOCK_ACTION_NONE: break;
+    case CLOCK_ACTION_OPEN_MENU: gui->menu_open = true; break;
+    case CLOCK_ACTION_GO_SCREEN: clock_gui__show_screen(gui, (clock_screen_t)arg, false); break;
     case CLOCK_ACTION_CLOSE: return clock_gui__close(gui);
-    case CLOCK_ACTION_ADD_TIMER: (void)clock_model__add_timer(&gui->model, (uint32_t)item->arg, now_ms); break;
+    case CLOCK_ACTION_ADD_TIMER: (void)clock_model__add_timer(&gui->model, (uint32_t)arg, now_ms); break;
     case CLOCK_ACTION_CUSTOM_TIMER: clock_gui__add_custom_timer(gui); break;
     case CLOCK_ACTION_TOGGLE_TIMER: clock_model__toggle_timer(&gui->model, index, now_ms); break;
     case CLOCK_ACTION_REMOVE_TIMER: clock_model__remove_timer(&gui->model, index); break;
@@ -155,59 +161,34 @@ static bool clock_gui__on_back(clock_gui_t *gui) {
     return clock_gui__close(gui);
 }
 
-static bool clock_gui__on_select(clock_gui_t *gui, const clock_now_t *now) {
-    if (gui->screen == CLOCK_SCREEN_FACE && !gui->menu_open) {
+/* Back and Select on the bare face belong to the clock; everything else is LVGL's. */
+static bool clock_gui__on_input(clock_gui_t *gui, const bruce_input_event_t *input) {
+    bool key = input->type != BRUCE_INPUT_TOUCH && input->action == BRUCE_INPUT_PRESS;
+    if (key && input->code == BRUCE_INPUT_CODE_BACK) return clock_gui__on_back(gui);
+    if (key && input->code == BRUCE_INPUT_CODE_SELECT && gui->screen == CLOCK_SCREEN_FACE && !gui->menu_open) {
         gui->menu_open = true;
         return false;
     }
-    const clock_item_t *item = clock_ui__focused(&gui->ui);
-    return item != NULL && clock_gui__activate(gui, item, now);
-}
-
-/* Returns true when the app should exit. */
-static bool clock_gui__on_key(clock_gui_t *gui, int32_t code, const clock_now_t *now) {
-    switch (code) {
-    case BRUCE_INPUT_CODE_BACK: return clock_gui__on_back(gui);
-    case BRUCE_INPUT_CODE_SELECT: return clock_gui__on_select(gui, now);
-    case BRUCE_INPUT_CODE_PREV:
-    case BRUCE_INPUT_CODE_LEFT: clock_ui__focus_step(&gui->ui, -1); break;
-    case BRUCE_INPUT_CODE_NEXT:
-    case BRUCE_INPUT_CODE_RIGHT: clock_ui__focus_step(&gui->ui, 1); break;
-    case BRUCE_INPUT_CODE_UP: clock_ui__focus_row(&gui->ui, -1); break;
-    case BRUCE_INPUT_CODE_DOWN: clock_ui__focus_row(&gui->ui, 1); break;
-    default: break;
-    }
+    lvgl__input(input);
     return false;
 }
 
-/* A tap opens the menu bar from the bare face, otherwise presses the button under it. */
-static bool clock_gui__on_touch(clock_gui_t *gui, bruce_input_gesture_t gesture, const bruce_input_touch_t *touch, const clock_now_t *now) {
-    switch (gesture) {
-    case BRUCE_INPUT_GESTURE_TAP:
-    case BRUCE_INPUT_GESTURE_HOLD:
-        if (gui->screen == CLOCK_SCREEN_FACE && !gui->menu_open) return clock_gui__on_select(gui, now);
-        if (clock_ui__focus_at(&gui->ui, (int16_t)touch->x, (int16_t)touch->y)) return clock_gui__on_select(gui, now);
-        if (gui->screen == CLOCK_SCREEN_FACE) gui->menu_open = false;
-        break;
-    case BRUCE_INPUT_GESTURE_SWIPE_UP: clock_ui__focus_row(&gui->ui, 1); break;
-    case BRUCE_INPUT_GESTURE_SWIPE_DOWN: clock_ui__focus_row(&gui->ui, -1); break;
-    default: break;
-    }
-    return false;
-}
-
-static void clock_gui__redraw_if_changed(clock_gui_t *gui, const clock_now_t *now) {
-    if (process__is_background() && display__width() == 0) return;
+static void clock_gui__show(clock_gui_t *gui, const clock_now_t *now) {
     clock_scene_t scene = clock_gui__scene(gui, now);
-    if (process__is_background()) clock_screens__build_preview(&gui->ui, &scene);
-    else clock_screens__build(&gui->ui, &scene, gui->screen, gui->menu_open);
-
-    uint32_t signature = clock_ui__signature(&gui->ui);
-    bool moved = display__viewport_changed();
-    if (gui->has_drawn && signature == gui->drawn_signature && !moved) return;
-    if (clock_ui__draw(&gui->ui) != BRUCE_OK) return;
-    gui->drawn_signature = signature;
-    gui->has_drawn = true;
+    clock_layout_t layout;
+    memset(&layout, 0, sizeof(layout));
+    layout.preview = process__is_background();
+    layout.screen = layout.preview ? CLOCK_SCREEN_FACE : gui->screen;
+    layout.menu_open = !layout.preview && gui->menu_open;
+    layout.width = scene.width;
+    layout.height = scene.height;
+    layout.local_valid = scene.local != NULL;
+    layout.menu_hint = !layout.preview && !gui->menu_open && gui->screen == CLOCK_SCREEN_FACE && scene.show_menu_hint;
+    layout.headline = layout.preview ? clock_model__headline(&gui->model, scene.now_ms).kind : CLOCK_HEADLINE_NONE;
+    layout.timers = gui->model.timer_count;
+    layout.alarms = gui->model.alarm_count;
+    layout.laps = gui->model.stopwatch.lap_count;
+    clock_screens__show(&gui->view, &scene, &layout);
 }
 
 /* A minimised clock that is not tiled into the process preview has no viewport, so it badges the screen instead. */
@@ -240,7 +221,6 @@ static void clock_gui__follow_foreground(clock_gui_t *gui) {
 }
 
 static int clock_gui__loop(clock_gui_t *gui) {
-    bruce_input_touch_t touch = {0};
     for (;;) {
         clock_now_t now = clock_gui__now();
         clock_event_t event = clock_model__tick(&gui->model, runtime__now(), now.seconds);
@@ -250,17 +230,24 @@ static int clock_gui__loop(clock_gui_t *gui) {
         }
         clock_gui__follow_foreground(gui);
         clock_gui__update_overlay(gui);
-        clock_gui__redraw_if_changed(gui, &now);
+        if (display__width() > 0) clock_gui__show(gui, &now);
+        uint32_t wait = lvgl__step();
 
+        clock_action_t action = gui->view.action;
+        gui->view.action = CLOCK_ACTION_NONE;
+        if (action != CLOCK_ACTION_NONE) {
+            if (clock_gui__activate(gui, action, gui->view.arg, &now)) return BRUCE_OK;
+            continue;
+        }
+
+        uint32_t poll = clock_gui__poll_ms(gui);
         bruce_input_event_t input;
-        bruce_result_t result = input__read(&input, clock_gui__poll_ms(gui));
+        bruce_result_t result = input__read(&input, wait < poll ? wait : poll);
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
             if (runtime__delay(CLOCK_GUI__IDLE_POLL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-        } else if (result == BRUCE_OK && input.type == BRUCE_INPUT_TOUCH) {
-            if (clock_gui__on_touch(gui, input__touch_gesture(&touch, &input), &touch, &now)) return BRUCE_OK;
-        } else if (result == BRUCE_OK && input.action == BRUCE_INPUT_PRESS) {
-            if (clock_gui__on_key(gui, input.code, &now)) return BRUCE_OK;
-        } else if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) {
+        } else if (result == BRUCE_OK) {
+            if (clock_gui__on_input(gui, &input)) return BRUCE_OK;
+        } else if (result != BRUCE_ERR_TIMEOUT) {
             return result;
         }
     }
@@ -274,7 +261,13 @@ int clock_gui__run(clock_screen_t first_screen) {
     clock_gui__load_alarms(&gui->model, &now);
     clock_gui__show_screen(gui, first_screen, false);
     (void)input__flush();
+    bruce_result_t started = lvgl__begin();
+    if (started != BRUCE_OK) {
+        memory__free(gui);
+        return started;
+    }
     int result = clock_gui__loop(gui);
+    lvgl__end();
     memory__free(gui);
     return result;
 }

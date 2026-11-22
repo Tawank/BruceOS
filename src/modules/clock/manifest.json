@@ -3,7 +3,9 @@
   "entryPoint": "clock_app_main",
   "appIcon": "icon:clock-outline",
   "coreAbiVersion": 4,
-  "permissions": ["config"],
+  "permissions": [
+    "config"
+  ],
   "stackSize": 6144,
   "singleInstance": true,
   "build": {
@@ -12,10 +14,13 @@
       "clock_gui.c",
       "clock_model.c",
       "clock_overlay.c",
-      "clock_screens.c",
-      "clock_ui.c"
+      "clock_screens.c"
     ],
-    "includeDirs": ["."],
-    "targets": ["elf", "wasm"]
+    "includeDirs": [
+      "."
+    ],
+    "targets": [
+      "elf"
+    ]
   }
 }

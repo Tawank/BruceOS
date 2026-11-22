@@ -1412,6 +1412,23 @@ bruce_result_t display__present(void) {
     return result;
 }
 
+bool display_internal__frame_pixels(bruce_display_color_t **out_origin, int *out_stride) {
+    bruce_process_id_t caller = process__current_id();
+    display__lock();
+    const display__process_context_t *context = display__find_context_locked(caller);
+    bool usable = s_initialized && s_buffered_rendering && s_framebuffer != NULL && context != NULL &&
+                  context->frame_active && !context->frame_noop && context->active_overlay == NULL &&
+                  context->viewport.width > 0 && context->viewport.height > 0 && context->viewport.x >= 0 &&
+                  context->viewport.y >= 0 && context->viewport.x + context->viewport.width <= s_fb_width &&
+                  context->viewport.y + context->viewport.height <= s_fb_height;
+    if (usable) {
+        *out_origin = &s_framebuffer[context->viewport.y * s_fb_width + context->viewport.x];
+        *out_stride = s_fb_width;
+    }
+    display__unlock();
+    return usable;
+}
+
 bool display__viewport_changed(void) {
     bruce_process_id_t caller = process__current_id();
     display__lock();

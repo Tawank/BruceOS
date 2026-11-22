@@ -139,6 +139,7 @@ idf_component_register(SRCS
                     "core/filetype/filetype.c"
                      "core/launcher/launcher.c"
                     "core/lib/lib.c"
+                    "core/lvgl/lvgl_port.c"
                     "core/lib/lib_symbols.c"
                      "core/launcher/launcher_tree.c"
                      "core/manifest/manifest.c"
@@ -201,7 +202,6 @@ idf_component_register(SRCS
                     "modules/clock/clock_model.c"
                     "modules/clock/clock_overlay.c"
                     "modules/clock/clock_screens.c"
-                    "modules/clock/clock_ui.c"
                     "modules/config/config_app.c"
                     "modules/device_bus/device_bus_app.c"
                      "modules/filemanager/filemanager_app.c"
@@ -314,6 +314,7 @@ idf_component_register(SRCS
                     esp_lcd_touch_ft5x06
                     esp_timer
                     esp_jpeg
+                    lvgl
                     esp_hid
                      esp_mm
                      esp_netif
@@ -444,6 +445,36 @@ add_custom_command(
 add_custom_target(bruce_embedded_resources DEPENDS ${BRUCE_EMBEDDED_RESOURCES_HEADERS})
 add_dependencies(${COMPONENT_LIB} bruce_embedded_resources)
 
+# The ELF loader exports LVGL's public API (core_sdk/lvgl.h): every lv_*
+# declaration lv_conf.h enables, listed from lvgl.h at build time so the list
+# always matches the configuration.
+idf_build_get_property(bruce_python PYTHON)
+idf_component_get_property(bruce_lvgl_dir lvgl__lvgl COMPONENT_DIR)
+set(BRUCE_LVGL_CONF_DIR "${CMAKE_CURRENT_LIST_DIR}/core_sdk/lvgl")
+set(BRUCE_LVGL_API "${CMAKE_CURRENT_BINARY_DIR}/lvgl_api.h")
+set(BRUCE_LVGL_EXPORTS "${CMAKE_CURRENT_BINARY_DIR}/lvgl_exports.inc")
+add_custom_command(
+    OUTPUT ${BRUCE_LVGL_EXPORTS}
+    COMMAND ${CMAKE_C_COMPILER} -E -P -DLV_KCONFIG_IGNORE -I${BRUCE_LVGL_CONF_DIR} -I${bruce_lvgl_dir}
+            ${bruce_lvgl_dir}/lvgl.h -o ${BRUCE_LVGL_API}
+    COMMAND ${bruce_python} ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_lvgl_exports.py ${BRUCE_LVGL_API}
+            ${BRUCE_LVGL_EXPORTS}
+    DEPENDS ${BRUCE_LVGL_CONF_DIR}/lv_conf.h ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_lvgl_exports.py
+    COMMENT "Listing LVGL exports"
+    VERBATIM)
+add_custom_target(bruce_lvgl_exports DEPENDS ${BRUCE_LVGL_EXPORTS})
+add_dependencies(${COMPONENT_LIB} bruce_lvgl_exports)
+target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+# The SDK check targets below are plain CMake targets, outside the global
+# options the root CMakeLists.txt gives components.
+idf_component_get_property(bruce_lvgl_lib lvgl__lvgl COMPONENT_LIB)
+function(bruce_use_lvgl target)
+    target_link_libraries(${target} PRIVATE ${bruce_lvgl_lib})
+    target_include_directories(${target} PRIVATE "${BRUCE_LVGL_CONF_DIR}")
+    target_compile_definitions(${target} PRIVATE LV_KCONFIG_IGNORE)
+endfunction()
+
 set_source_files_properties(${BRUCE_SELFTEST_SOURCES} PROPERTIES
                             COMPILE_OPTIONS
                             "-include;${CMAKE_CURRENT_LIST_DIR}/modules/selftest/selftest_output.h")
@@ -522,11 +553,11 @@ add_library(bruce_sdk_builtin_clock_check OBJECT
             "modules/clock/clock_gui.c"
             "modules/clock/clock_model.c"
             "modules/clock/clock_overlay.c"
-            "modules/clock/clock_screens.c"
-            "modules/clock/clock_ui.c")
+            "modules/clock/clock_screens.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/clock")
+bruce_use_lvgl(bruce_sdk_builtin_clock_check)
 
 add_library(bruce_sdk_builtin_config_check OBJECT "modules/config/config_app.c")
 target_include_directories(bruce_sdk_builtin_config_check PRIVATE
@@ -738,6 +769,9 @@ target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
 # component API; the core_sdk-only check is about rejecting Core-private headers,
 # not component dependencies.
 target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
+bruce_use_lvgl(bruce_sdk_builtin_elf_loader_check)
+target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(bruce_sdk_builtin_elf_loader_check bruce_lvgl_exports)
 
 add_library(bruce_sdk_builtin_js_loader_check OBJECT
             "modules/loaders/js/audio_js.c"

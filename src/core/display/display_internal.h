@@ -121,6 +121,14 @@ void display_internal__draw_rgb_bitmap(
     display__process_context_t *context, int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h
 );
 bool display_internal__on_transfer_done_from_isr(void);
+
+/* The caller's viewport inside the framebuffer, to draw into directly (LVGL
+ * does, core/lvgl): the address of its (0, 0) and the framebuffer's row
+ * length in pixels. Only while the caller has a frame open
+ * (display__begin_frame()), which keeps the framebuffer in place; false
+ * without a framebuffer (direct render mode), for a hidden or overlay
+ * session, or for a viewport not wholly on screen. */
+bool display_internal__frame_pixels(bruce_display_color_t **out_origin, int *out_stride);
 /* E-paper: transfers the area presented since the last call (or, with `all`,
  * the whole frame) into the panel driver. Called by the panel task right
  * before each refresh. */

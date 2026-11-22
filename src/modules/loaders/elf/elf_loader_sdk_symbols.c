@@ -61,6 +61,7 @@
 #include "core_sdk/icon.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
+#include "core_sdk/lvgl.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -813,6 +814,10 @@ static _Noreturn void bruce_elf__exit_common(int status, const char *name) {
 }
 
 _Noreturn void bruce_elf__exit(int status) { bruce_elf__exit_common(status, "exit"); }
+
+/* Core's LV_GLOBAL_CUSTOM hook (core/lvgl/lvgl_port.c); LVGL declares it only
+ * in its private headers. */
+struct _lv_global_t *lv_global_default(void);
 
 /* Only for loaders (the external WebAssembly loader): an app without the
  * execute permission must not prompt for permissions under other names. */
@@ -2516,6 +2521,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(dialog__text_input),
     ESP_ELFSYM_EXPORT(dialog__hex_input),
     ESP_ELFSYM_EXPORT(dialog__number_input),
+    ESP_ELFSYM_EXPORT(dialog__duration_input),
+    ESP_ELFSYM_EXPORT(dialog__time_of_day_input),
     ESP_ELFSYM_EXPORT(dialog__create_text_viewer),
     ESP_ELFSYM_EXPORT(dialog__viewer_set_text),
     ESP_ELFSYM_EXPORT(dialog__viewer_set_text_size),
@@ -3001,6 +3008,17 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
                        (const void *)&bruce_elf__throw_length_error                                          }, /* std::__throw_length_error(const char*) */
     {"_ZSt28__throw_bad_array_new_lengthv",
                        (const void *)&bruce_elf__throw_bad_array_new_length                                  }, /* std::__throw_bad_array_new_length() */
+
+    /* LVGL (core_sdk/lvgl.h): Core's setup per process, then LVGL's own API. */
+    ESP_ELFSYM_EXPORT(lvgl__begin),
+    ESP_ELFSYM_EXPORT(lvgl__input),
+    ESP_ELFSYM_EXPORT(lvgl__step),
+    ESP_ELFSYM_EXPORT(lvgl__end),
+    ESP_ELFSYM_EXPORT(lvgl__font),
+    ESP_ELFSYM_EXPORT(lvgl__color),
+    ESP_ELFSYM_EXPORT(lvgl__icon_create),
+    ESP_ELFSYM_EXPORT(lv_global_default),
+#include "lvgl_exports.inc"
 
     ESP_ELFSYM_END,
 };
