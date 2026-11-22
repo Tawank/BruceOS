@@ -13,3 +13,7 @@ void device__power_hold_init(void);
 /* Drives one pin of the board's XL9555 expander (BRUCE_BOARD_XL9555_*), e.g.
  * a power enable. Returns false without the expander. */
 bool device__xl9555_set(int pin, bool high);
+
+/* The latest battery level from an I2C gauge, set by device_bus; what
+ * device__get_battery() returns on those boards. */
+void device__set_battery_internal(int percent);

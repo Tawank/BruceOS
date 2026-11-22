@@ -47,16 +47,14 @@
     CONFIG_BRUCE_BATTERY_BACKEND_BQ27220
 /* All I2C fuel-gauge/PMIC backends are read the same way from here: the
  * device_bus process (modules/device_bus/) is the sole
- * owner of the shared board I2C bus and publishes readings on
- * BRUCE_DEVICE_TOPIC_BATTERY; this file just caches the latest one. */
+ * owner of the shared board I2C bus; it hands each reading to
+ * device__set_battery_internal() and publishes it on
+ * BRUCE_DEVICE_TOPIC_BATTERY. */
 #define DEVICE__BATTERY_BACKEND_I2C 1
 #else
 #define DEVICE__BATTERY_CHANNEL ((adc_channel_t)CONFIG_BRUCE_BATTERY_ADC_CHANNEL)
 #endif
 
-static StaticSemaphore_t s_lock_storage;
-static SemaphoreHandle_t s_lock;
-static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void device__restart_task(void *context) {
     uint32_t delay_ms = (uint32_t)(uintptr_t)context;
@@ -312,6 +310,25 @@ void device__power_hold_init(void) {
 #endif
 }
 
+#if defined(DEVICE__BATTERY_BACKEND_I2C)
+
+/* -1 until device_bus has read the gauge once. Kept here rather than in a
+ * subscription of the caller's: that would close with the process that
+ * happened to ask first, and miss every reading after it. */
+static volatile int s_cached_battery = -1;
+
+void device__set_battery_internal(int percent) { s_cached_battery = percent; }
+
+int device__get_battery(void) {
+    int percent = s_cached_battery;
+    return percent >= 0 ? percent : BRUCE_ERR_NOT_FOUND;
+}
+
+#elif !defined(DEVICE__NO_BATTERY)
+static StaticSemaphore_t s_lock_storage;
+static SemaphoreHandle_t s_lock;
+static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
+
 static bool device__ensure_lock(void) {
     if (s_lock != NULL) return true;
     portENTER_CRITICAL(&s_init_mux);
@@ -320,37 +337,6 @@ static bool device__ensure_lock(void) {
     return s_lock != NULL;
 }
 
-#if defined(DEVICE__BATTERY_BACKEND_I2C)
-
-static bruce_pubsub_id_t s_battery_sub = BRUCE_PUBSUB_ID_INVALID;
-static bool s_cached_battery_valid;
-static int s_cached_battery;
-
-int device__get_battery(void) {
-    if (!device__ensure_lock()) return BRUCE_ERR_NO_MEMORY;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-
-    if (s_battery_sub == BRUCE_PUBSUB_ID_INVALID &&
-        pubsub__subscribe(BRUCE_DEVICE_TOPIC_BATTERY, &s_battery_sub) != BRUCE_OK) {
-        xSemaphoreGive(s_lock);
-        return BRUCE_ERR_IO;
-    }
-
-    bruce_pubsub_message_t message;
-    while (pubsub__read(s_battery_sub, &message, 0) == BRUCE_OK) {
-        if (message.size != sizeof(bruce_device_battery_message_t)) continue;
-        bruce_device_battery_message_t battery;
-        memcpy(&battery, message.data, sizeof(battery));
-        s_cached_battery = battery.percent;
-        s_cached_battery_valid = true;
-    }
-
-    int result = s_cached_battery_valid ? s_cached_battery : BRUCE_ERR_NOT_FOUND;
-    xSemaphoreGive(s_lock);
-    return result;
-}
-
-#elif !defined(DEVICE__NO_BATTERY)
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_adc_cali;
 static bool s_battery_initialized;

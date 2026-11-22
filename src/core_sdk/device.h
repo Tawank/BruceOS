@@ -58,7 +58,7 @@ bruce_result_t device__sleep(void);
  * core/device/board_i2c.h) and is the only thing that ever talks to those
  * controllers directly; it publishes their readings on these topics (via
  * core_sdk/pubsub.h) instead. device__get_battery() already reads from the
- * battery topic's cache for you - subscribe to BRUCE_DEVICE_TOPIC_BATTERY
+ * latest reading for you - subscribe to BRUCE_DEVICE_TOPIC_BATTERY
  * yourself only if you need updates as they happen.
  */
 #define BRUCE_DEVICE_TOPIC_TOUCH "device.touch"

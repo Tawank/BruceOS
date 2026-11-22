@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "core/device/board_i2c.h"
+#include "core/device/device.h"
 
 #include "core_sdk/device.h"
 #include "core_sdk/process.h"
@@ -21,6 +22,7 @@
 
 #define DEVICE_BUS__POLL_PERIOD_MS 20
 #define DEVICE_BUS__BATTERY_POLL_PERIOD_MS 30000
+#define DEVICE_BUS__BATTERY_RETRY_MS 2000
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE || !CONFIG_BRUCE_BATTERY_ENABLED
 #define DEVICE_BUS__NO_I2C_BATTERY 1
@@ -322,12 +324,13 @@ static bool device_bus__battery_read(int *out_percent) {
 #endif
 
 #if !defined(DEVICE_BUS__NO_I2C_BATTERY)
-static void device_bus__battery_poll(i2c_master_bus_handle_t bus) {
-    if (!device_bus__battery_ensure_device(bus)) return;
+static bool device_bus__battery_poll(i2c_master_bus_handle_t bus) {
     int percent = 0;
-    if (!device_bus__battery_read(&percent)) return;
+    if (!device_bus__battery_ensure_device(bus) || !device_bus__battery_read(&percent)) return false;
+    device__set_battery_internal(percent);
     bruce_device_battery_message_t message = {.percent = percent};
     (void)pubsub__publish(BRUCE_DEVICE_TOPIC_BATTERY, &message, sizeof(message));
+    return true;
 }
 #endif
 
@@ -347,16 +350,17 @@ int device_bus_app_main(int argc, char **argv) {
     device_bus__touch_reset();
 #endif
 
-    uint64_t last_battery_poll_at = 0;
+    /* The first reading at once, so the level shows right after boot; a failed one is tried again soon. */
+    uint64_t next_battery_poll_at = 0;
     while (process__current_signal() == 0) {
 #if CONFIG_BRUCE_TOUCH_ENABLED
         device_bus__touch_poll(bus);
 #endif
 #if !defined(DEVICE_BUS__NO_I2C_BATTERY)
         uint64_t now = runtime__now();
-        if (now - last_battery_poll_at >= DEVICE_BUS__BATTERY_POLL_PERIOD_MS) {
-            device_bus__battery_poll(bus);
-            last_battery_poll_at = now;
+        if (now >= next_battery_poll_at) {
+            bool read = device_bus__battery_poll(bus);
+            next_battery_poll_at = now + (read ? DEVICE_BUS__BATTERY_POLL_PERIOD_MS : DEVICE_BUS__BATTERY_RETRY_MS);
         }
 #endif
         bruce_result_t result = runtime__sleep(DEVICE_BUS__POLL_PERIOD_MS);
