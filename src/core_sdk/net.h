@@ -25,8 +25,9 @@ bool net__is_online(void);
 /**
  * @brief Starts getting online without waiting.
  *
- * Joins a saved Wi-Fi network in range, or waits for mobile data when it is
- * turned on; the app picks no network, so this needs no `wifi` permission.
+ * Waits for mobile data when it is turned on and still connecting, and joins
+ * a saved Wi-Fi network in range when it is off, fails, or takes longer than
+ * 15 seconds; the app picks no network, so this needs no `wifi` permission.
  * Returns BRUCE_OK straight away when already online. Follow up with
  * net__connect_poll(). Not permission-gated; the calls that then use the
  * network check their own permissions.
@@ -37,8 +38,9 @@ bruce_result_t net__connect_start(void);
  * @brief Result of net__connect_start().
  *
  * BRUCE_OK once online, BRUCE_ERR_BUSY while trying, BRUCE_ERR_TIMEOUT when
- * mobile data did not come up within a minute, otherwise why Wi-Fi failed
- * (BRUCE_ERR_NOT_FOUND when no saved network is in range).
+ * mobile data did not come up within 15 seconds and Wi-Fi did not help either,
+ * otherwise why Wi-Fi failed (BRUCE_ERR_NOT_FOUND when no saved network is in
+ * range).
  */
 bruce_result_t net__connect_poll(void);
 

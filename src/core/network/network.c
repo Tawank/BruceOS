@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 
+#include "esp_event.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -27,6 +28,9 @@ bruce_result_t network__init(void) {
     }
 
     esp_err_t err = esp_netif_init();
+    /* The default loop carries netif, DHCP and HTTP client events; it stays,
+     * since Wi-Fi and mobile data come and go independently. */
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         xSemaphoreGive(s_network_mutex);
         return BRUCE_ERR_IO;

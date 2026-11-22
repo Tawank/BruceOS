@@ -519,9 +519,10 @@ gets `+++` (a second of silence on each side, per the manual) and `ATH`.
 
 Apps that only need the internet don't touch Wi-Fi: `net__is_online()` is
 true while Wi-Fi or mobile data is up, and `net__connect_start()` /
-`net__connect_poll()` join a saved Wi-Fi network (Wi-Fi's own connect,
-without the `wifi` permission, since the app picks nothing) or wait up to a
-minute for mobile data that is turned on. Browser, Maps, ssh/sftp and nc use
+`net__connect_poll()` first wait up to 15 seconds for mobile data that is
+turned on and still connecting (e.g. just after boot), and only then, or
+when it is off, join a saved Wi-Fi network (Wi-Fi's own connect, without the
+`wifi` permission, since the app picks nothing). Browser, Maps, ssh/sftp and nc use
 them; `clock__sync_ntp()` only needs to be online, and a new mobile data link
 starts the automatic NTP sync as a Wi-Fi connection does.
 CMUX stays on until the modem is turned off. A modem left in CMUX by a reboot
