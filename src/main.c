@@ -3,6 +3,8 @@
 #include "esp_system.h"
 #include <stdio.h>
 
+#include "sdkconfig.h"
+
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
 
@@ -36,7 +38,9 @@
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
+#if CONFIG_BRUCE_WASM_BUILTIN
 #include "modules/loaders/wasm/wasm_loader_app.h"
+#endif
 #include "modules/nc/nc_app.h"
 #include "modules/nmap/nmap_app.h"
 #include "modules/notification_service/notification_service.h"
@@ -44,7 +48,9 @@
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/player/player_app.h"
 #include "modules/privileged/app_settings/app_settings_app.h"
+#if CONFIG_BRUCE_QEMU_TEST_MODE
 #include "modules/selftest/selftest.h"
+#endif
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
 #include "modules/ssh/ssh_sftp_app.h"
@@ -82,7 +88,9 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"permissions",          "Alias of appsettings",                                      "System",  app_settings_app_main,        8192,  false},
     {"process",              "List and manage processes",                                 "System",  process_app_main,             0,     false},
     {"reboot",               "Restart the device",                                        "System",  bnu_reboot_app_main,          0,     false},
+#if CONFIG_BRUCE_QEMU_TEST_MODE
     {"selftest",             "Hardware and Core self-tests",                              "System",  selftest_app_main,            8192,  false},
+#endif
     {"shutdown",             "Power off the device",                                      "System",  bnu_shutdown_app_main,        0,     false},
     {"sleep",                "Pause for a duration",                                      "System",  bnu_sleep_app_main,           0,     false},
     {"suspend",              "Sleep the device until Select is pressed",                  "System",  bnu_suspend_app_main,         0,     false},
@@ -143,7 +151,9 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     /* Runtime - ELF, JS, and Wasm application loaders. */
     {"elf",                  "Run ELF applications",                                      "Runtime", elf_loader__app_main,         0,     false},
     {"js",                   "Run JavaScript applications",                               "Runtime", js_loader__app_main,          0,     false},
+#if CONFIG_BRUCE_WASM_BUILTIN
     {"wasm",                 "Run WebAssembly applications",                              "Runtime", wasm_loader__app_main,        0,     false},
+#endif
 
     /* Shell - terminals, shells, and command frontends. */
     {"serial_commands",      "Run the terminal command service",                          "Shell",   serial_commands_app_main,     3072,  false},

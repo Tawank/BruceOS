@@ -7,10 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pthread.h>
+
 #include "args.h"
-#include "esp_heap_caps.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "wasm_export.h"
 
 #include "core_sdk/app_runner.h"
@@ -41,10 +40,14 @@
 
 static size_t s_call_count;
 static bool s_runtime_initialized;
-static TaskHandle_t s_runtime_init_task;
-static StaticSemaphore_t s_runtime_mutex_storage;
-static SemaphoreHandle_t s_runtime_mutex;
-static portMUX_TYPE s_runtime_mutex_init = portMUX_INITIALIZER_UNLOCKED;
+/* Only SDK calls here, so the same code runs built in and as an external ELF. */
+static bruce_process_id_t s_runtime_init_process = BRUCE_PROCESS_ID_INVALID;
+static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static size_t wasm_loader__largest_internal_block(void) {
+    bruce_memory_stats_t stats = {0};
+    return memory__get_stats(&stats) == BRUCE_OK ? stats.internal_largest_block : 0;
+}
 
 size_t wasm_loader__debug_call_count(void) { return s_call_count; }
 
@@ -58,16 +61,14 @@ _Static_assert(sizeof(wasm_loader_allocation_header_t) == 12, "WAMR allocation h
 
 static void *wasm_loader__runtime_malloc(unsigned int size) {
     if (size > UINT32_MAX - sizeof(wasm_loader_allocation_header_t) - 7u) return NULL;
-    bool process_owned = process__current_id() != BRUCE_PROCESS_ID_INVALID &&
-                         xTaskGetCurrentTaskHandle() != s_runtime_init_task;
+    bruce_process_id_t process = process__current_id();
+    bool process_owned = process != BRUCE_PROCESS_ID_INVALID && process != s_runtime_init_process;
     size_t allocation_size = size + sizeof(wasm_loader_allocation_header_t) + 7u;
     void *base = process_owned ? memory__malloc(allocation_size) : malloc(allocation_size);
     if (base == NULL) {
         printf(
-            "[wasm_loader] allocation failed: request=%u free=%u largest=%u\n",
-            size,
-            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)
+            "[wasm_loader] allocation failed: request=%u largest=%u\n", size,
+            (unsigned)wasm_loader__largest_internal_block()
         );
         return NULL;
     }
@@ -102,7 +103,7 @@ void *wasm_loader__debug_runtime_malloc(size_t size) {
  * below) -- so on those boards the cap has to track *actual current* free
  * internal heap, not a fixed number tuned for one board. */
 static size_t wasm_loader__internal_module_budget(void) {
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t largest = wasm_loader__largest_internal_block();
     if (largest <= WASM_LOADER_MODULE_BUDGET_RESERVE_BYTES) return WASM_LOADER_MODULE_BUDGET_MIN_BYTES;
     size_t budget = largest - WASM_LOADER_MODULE_BUDGET_RESERVE_BYTES;
     return budget < WASM_LOADER_MODULE_BUDGET_MIN_BYTES ? WASM_LOADER_MODULE_BUDGET_MIN_BYTES : budget;
@@ -306,16 +307,9 @@ static bool wasm_loader__normalize_path(const char *path, char *out, size_t out_
 
 static bool wasm_loader__init_runtime(void) {
     if (s_runtime_initialized) return true;
-    if (s_runtime_mutex == NULL) {
-        portENTER_CRITICAL(&s_runtime_mutex_init);
-        if (s_runtime_mutex == NULL) {
-            s_runtime_mutex = xSemaphoreCreateMutexStatic(&s_runtime_mutex_storage);
-        }
-        portEXIT_CRITICAL(&s_runtime_mutex_init);
-    }
-    xSemaphoreTake(s_runtime_mutex, portMAX_DELAY);
+    pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_initialized) {
-        xSemaphoreGive(s_runtime_mutex);
+        pthread_mutex_unlock(&s_runtime_mutex);
         return true;
     }
 
@@ -329,23 +323,23 @@ static bool wasm_loader__init_runtime(void) {
      * WAMR. Keep those global blocks outside per-process accounting; module,
      * instance, linear-memory, and exec-env allocations are made later by the
      * child task and are charged to that child. */
-    s_runtime_init_task = xTaskGetCurrentTaskHandle();
+    s_runtime_init_process = process__current_id();
     if (!wasm_runtime_full_init(&init_args)) {
-        s_runtime_init_task = NULL;
+        s_runtime_init_process = BRUCE_PROCESS_ID_INVALID;
         printf("[wasm_loader] failed to initialize runtime\n");
-        xSemaphoreGive(s_runtime_mutex);
+        pthread_mutex_unlock(&s_runtime_mutex);
         return false;
     }
     if (!wasm_bruce_host_adapter__register()) {
         printf("[wasm_loader] failed to register Bruce SDK imports\n");
         wasm_runtime_destroy();
-        s_runtime_init_task = NULL;
-        xSemaphoreGive(s_runtime_mutex);
+        s_runtime_init_process = BRUCE_PROCESS_ID_INVALID;
+        pthread_mutex_unlock(&s_runtime_mutex);
         return false;
     }
-    s_runtime_init_task = NULL;
+    s_runtime_init_process = BRUCE_PROCESS_ID_INVALID;
     s_runtime_initialized = true;
-    xSemaphoreGive(s_runtime_mutex);
+    pthread_mutex_unlock(&s_runtime_mutex);
     return true;
 }
 

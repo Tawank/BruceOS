@@ -187,7 +187,6 @@ The launcher menu is defined in `launcher.conf`:
     "Partitions": "bparted",
     "About": "config about"
   },
-  "Selftest@test-tube": "terminal selftest",
   "Apps@apps": "apps"
 }
 ```

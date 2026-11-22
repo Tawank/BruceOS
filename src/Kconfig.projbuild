@@ -3,9 +3,12 @@ menu "Bruce hardware configuration"
     config BRUCE_QEMU_TEST_MODE
         bool "QEMU self-test mode"
         default n
+        select BRUCE_WASM_BUILTIN
         help
             Skip physical display and input initialization and expose the
-            serial self-test protocol used by the QEMU pytest suite.
+            serial self-test protocol used by the QEMU pytest suite. Also
+            builds in the `selftest` command, which other builds leave out,
+            and the WebAssembly loader its tests use.
 
     config BRUCE_QEMU_TEST_BOOT_COMMAND
         string "QEMU test-mode boot command"
@@ -34,6 +37,15 @@ menu "Bruce hardware configuration"
             reproductions all showed zero bytes delivered), not just assumed
             from the pre-existing "nothing types over the QEMU serial link"
             comment this confirms.
+
+    config BRUCE_WASM_BUILTIN
+        bool "Built-in WebAssembly loader"
+        default n
+        help
+            Builds the `wasm` command (WAMR) into the firmware. Without it,
+            .wasm files run through the external loader app: build it with
+            `native_apps/tools/build_modules.py --target elf --module wasm`
+            and copy wasm_<chip>.elf to /bin on the device.
 
     config BRUCE_POWER_HOLD_GPIO
         int "Power hold GPIO"

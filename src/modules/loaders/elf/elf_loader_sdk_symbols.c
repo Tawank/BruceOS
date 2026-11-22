@@ -814,6 +814,15 @@ static _Noreturn void bruce_elf__exit_common(int status, const char *name) {
 
 _Noreturn void bruce_elf__exit(int status) { bruce_elf__exit_common(status, "exit"); }
 
+/* Only for loaders (the external WebAssembly loader): an app without the
+ * execute permission must not prompt for permissions under other names. */
+static bruce_result_t
+bruce_elf__permission_preflight(const char *file_name, const char *const *permission_names, size_t count) {
+    bruce_result_t allowed = permission__check(BRUCE_PERMISSION_EXECUTE);
+    if (allowed != BRUCE_OK) return allowed;
+    return permission__preflight(file_name, permission_names, count);
+}
+
 _Noreturn void bruce_elf__abort(void) {
     stdio__printf("bruce: Aborted\n");
     bruce_elf__exit_common(BRUCE_ELF_ABORT_EXIT_CODE, "abort");
@@ -2069,6 +2078,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ext_mem_loader__stage_path),
     ESP_ELFSYM_EXPORT(ext_mem_loader__adopt_image),
     ESP_ELFSYM_EXPORT(ext_mem_loader__release_image),
+    ESP_ELFSYM_EXPORT(ext_mem_loader__format_error_message),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__environment_requests_gui),
@@ -2290,6 +2300,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(permission__check),
     ESP_ELFSYM_EXPORT(permission__from_name),
     ESP_ELFSYM_EXPORT(permission__name),
+    {"permission__preflight", (const void *)&bruce_elf__permission_preflight},
 
     /* Wi-Fi and HTTP client */
     ESP_ELFSYM_EXPORT(wifi__disconnect),
@@ -2679,6 +2690,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(tty__set_size),
     ESP_ELFSYM_EXPORT(tty__get_mode),
     ESP_ELFSYM_EXPORT(tty__set_mode),
+    ESP_ELFSYM_EXPORT(tty__get_mode_of),
 
     /* Standard C library subset. Console and heap calls are routed through
      * process-aware Bruce SDK functions rather than firmware libc. */

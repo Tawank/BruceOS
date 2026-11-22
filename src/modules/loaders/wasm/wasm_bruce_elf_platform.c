@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 
 void *heap_caps_malloc(size_t size, uint32_t caps) {
@@ -12,3 +13,7 @@ void *heap_caps_malloc(size_t size, uint32_t caps) {
 }
 
 int64_t esp_timer_get_time(void) { return (int64_t)(runtime__now() * 1000u); }
+
+/* WAMR's ESP-IDF port names threads by task handle; each Bruce process runs on
+ * its own task, so the process ID (never 0) stands in for it. */
+void *xTaskGetCurrentTaskHandle(void) { return (void *)(uintptr_t)process__current_id(); }

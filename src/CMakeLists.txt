@@ -64,6 +64,18 @@ else()
     set(BRUCE_BLUETOOTH_BACKEND_SRC "core/bluetooth/bluetooth_bluedroid.c")
 endif()
 
+# Selftests only in QEMU test builds; the WebAssembly loader only when built
+# in (see Kconfig.projbuild). main.c registers their commands to match.
+set(BRUCE_OPTIONAL_SOURCES)
+if(CONFIG_BRUCE_QEMU_TEST_MODE)
+    list(APPEND BRUCE_OPTIONAL_SOURCES ${BRUCE_SELFTEST_SOURCES})
+endif()
+if(CONFIG_BRUCE_WASM_BUILTIN)
+    list(APPEND BRUCE_OPTIONAL_SOURCES
+         "modules/loaders/wasm/wasm_loader_app.c"
+         "modules/loaders/wasm/wasm_bruce_host_adapter.c")
+endif()
+
 idf_component_register(SRCS
                     "main.c"
                      "core/app_config/app_config.c"
@@ -214,8 +226,6 @@ idf_component_register(SRCS
                      "modules/loaders/elf/elf_loader_app.c"
                      "modules/loaders/elf/elf_loader_sdk_symbols.c"
                      "modules/loaders/image/image_loader_app.c"
-                     "modules/loaders/wasm/wasm_loader_app.c"
-                     "modules/loaders/wasm/wasm_bruce_host_adapter.c"
                       "modules/loaders/js/audio_js.c"
                      "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
@@ -244,7 +254,7 @@ idf_component_register(SRCS
                       "modules/shell/shell_builtins.c"
                       "modules/shell/shell_jobs.c"
                      "modules/system_menu/system_menu_app.c"
-                     ${BRUCE_SELFTEST_SOURCES}
+                     ${BRUCE_OPTIONAL_SOURCES}
                     "modules/ssh/ssh_app.c"
                     "modules/ssh/ssh_sftp_app.c"
                      "modules/nc/nc_app.c"

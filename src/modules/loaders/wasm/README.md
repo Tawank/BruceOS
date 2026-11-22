@@ -4,6 +4,22 @@ WebAssembly applications run as external Core processes under WAMR. They import
 the supported API from the module named `bruce_sdk`; unknown imports make module
 loading fail.
 
+## Built in or external
+
+The loader is in the firmware only with `CONFIG_BRUCE_WASM_BUILTIN` (QEMU
+test builds turn it on). Otherwise `.wasm` files open with the external
+loader app, built from this directory's `manifest.json`:
+
+```bash
+python3 native_apps/tools/build_modules.py --target elf --idf-target esp32s3 --module wasm
+```
+
+Copy `native_apps/build_modules/wasm_esp32s3.elf` to `/bin` on the device:
+`.wasm` files run through the `wasm` command, and a command that is not built
+in is looked up as `/bin/<name>_<chip>.elf` (then `/apps`). The same source
+builds both ways, using only SDK calls; the external build adds
+`wasm_bruce_elf_platform.c` for the few ESP-IDF hooks WAMR's port expects.
+
 ## Security Model
 
 - The permission identity is the filename including `.wasm`, without its path.

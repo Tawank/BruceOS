@@ -54,6 +54,5 @@
     "Partitions": "bparted",
     "About": "config about"
   },
-  "Selftest@test-tube": "terminal selftest",
   "Apps@apps": "apps"
 }

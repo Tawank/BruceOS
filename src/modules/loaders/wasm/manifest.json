@@ -1,12 +1,12 @@
 {
   "appName": "WebAssembly loader",
   "entryPoint": "wasm_loader__app_main",
-  "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "appIcon": "icon:application-braces",
   "coreAbiVersion": 4,
   "permissions": ["execute", "storage"],
   "stackSize": 16384,
   "build": {
-    "name": "wasm_loader",
+    "name": "wasm",
     "sources": [
       "wasm_loader_app.c",
       "wasm_bruce_host_adapter.c",
