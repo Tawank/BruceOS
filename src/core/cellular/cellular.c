@@ -1169,8 +1169,8 @@ static uint8_t cellular__ppp_phase(void) {
     return pcb != NULL ? pcb->phase : PPP_PHASE_DEAD;
 }
 
-/* Sends `command` on DLC 2 and logs each line back until a final result;
- * returns that result, or "" after timeout_ms. */
+/* Sends `command` on DLC 2 and reads lines until a final result; returns
+ * it (logged unless OK or CONNECT), or "" after timeout_ms. */
 static const char *cellular__data_command(const char *command, uint32_t timeout_ms) {
     static char s_reply[64];
     (void)xStreamBufferReset(s_dial_stream);
@@ -1188,11 +1188,12 @@ static const char *cellular__data_command(const char *command, uint32_t timeout_
         if (length == 0) continue;
         s_reply[length] = '\0';
         length = 0;
-        ESP_LOGW(TAG, "DLC 2 %s: %s", command, s_reply);
-        if (strncmp(s_reply, "CONNECT", 7) == 0 || strcmp(s_reply, "OK") == 0 || strcmp(s_reply, "ERROR") == 0 ||
-            strcmp(s_reply, "NO CARRIER") == 0 || strcmp(s_reply, "BUSY") == 0 ||
-            strncmp(s_reply, "+CME ERROR", 10) == 0)
+        if (strncmp(s_reply, "CONNECT", 7) == 0 || strcmp(s_reply, "OK") == 0) return s_reply;
+        if (strcmp(s_reply, "ERROR") == 0 || strcmp(s_reply, "NO CARRIER") == 0 || strcmp(s_reply, "BUSY") == 0 ||
+            strncmp(s_reply, "+CME ERROR", 10) == 0) {
+            ESP_LOGW(TAG, "DLC 2 %s: %s", command, s_reply);
             return s_reply;
+        }
     }
     ESP_LOGW(TAG, "DLC 2 %s: no final result in %u ms", command, (unsigned)timeout_ms);
     return "";
@@ -1213,7 +1214,6 @@ static bool cellular__dial_data(void) {
         (void)cellular__data_command("ATH", 5000);
         if (strcmp(cellular__data_command("AT", 3000), "OK") != 0) return false;
     }
-    (void)cellular__data_command("AT+CGDCONT?", 3000);
     return strncmp(cellular__data_command("ATD*99#", 20000), "CONNECT", 7) == 0;
 }
 
