@@ -495,7 +495,13 @@ line and SMS parsers are pure and covered by the `cellular/parse` and
 
 `device__sleep()` also wakes on the modem's RI pin (`BRUCE_CELLULAR_RI_GPIO`,
 GPIO 7 on the T-Deck MAX; `AT+CFGRI=1` makes RI pulse on calls and texts).
-Lines sent while the UART was stopped are lost, so after every wake Core asks
+The modem sleeps meanwhile too: with `AT+CSCLK=1` (sent at every modem start,
+since the modem doesn't keep it) it sleeps once idle while DTR is high
+(`BRUCE_CELLULAR_DTR_GPIO`, GPIO 8 on the T-Deck MAX), still receiving calls
+and texts and reporting them on RI. DTR is raised, and held through the
+device's light sleep, only while suspended; after waking it is low again and
+Core retries `AT` until the modem answers. Its network LED is off while it
+sleeps. Lines sent while the UART was stopped are lost, so after every wake Core asks
 the modem: `AT+CLCC`, where an incoming call first seen there rings like one
 announced by `RING`, and `AT+CPMS?`, where a message count above the one
 before sleep announces a missed text.

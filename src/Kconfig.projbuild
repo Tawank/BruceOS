@@ -1084,6 +1084,16 @@ menu "Bruce hardware configuration"
             help
                 The modem pulls RI low on an incoming call or text, which wakes
                 the device from sleep.
+
+        config BRUCE_CELLULAR_DTR_GPIO
+            int "GPIO wired to the modem's DTR pin (-1 = none)"
+            depends on BRUCE_CELLULAR_ENABLED
+            range -1 48
+            default -1
+            help
+                Low keeps the modem awake. While the device is suspended it is
+                high, so the modem sleeps too (AT+CSCLK=1) and still wakes for
+                calls and texts, which it reports on RI.
     endmenu
 
     menu "Memory"

@@ -754,7 +754,20 @@ static bool cellular__open(void) {
 
 /* LilyGO's sequence: supply on with PWRKEY released, and pulse PWRKEY only
  * when the modem does not already answer. */
+/* DTR high lets the modem sleep (after AT+CSCLK=1); held through the
+ * device's light sleep, since pins may change state in it. */
+static void cellular__set_dtr(bool sleep) {
+    if (CONFIG_BRUCE_CELLULAR_DTR_GPIO < 0) return;
+    gpio_num_t pin = (gpio_num_t)CONFIG_BRUCE_CELLULAR_DTR_GPIO;
+    gpio_hold_dis(pin);
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pin, sleep ? 1 : 0);
+    if (sleep) gpio_hold_en(pin);
+}
+
 static bool cellular__power_on(void) {
+    /* A modem left in sleep mode by a restart wakes up and stays up. */
+    cellular__set_dtr(false);
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN, true);
     s_powered = true;
@@ -804,6 +817,9 @@ static void cellular__setup(void) {
     cellular__command("AT+CNMI=2,1,0,0,0", 1000);
     /* RI pulses low on a call or text, so it can wake the device. */
     if (CONFIG_BRUCE_CELLULAR_RI_GPIO >= 0) cellular__command("AT+CFGRI=1", 1000);
+    /* The modem sleeps whenever DTR is high (only while the device is
+     * suspended). Not saved by the modem, so set after every start. */
+    if (CONFIG_BRUCE_CELLULAR_DTR_GPIO >= 0) cellular__command("AT+CSCLK=1", 1000);
     cellular__set_volume_level();
     cellular__query_network();
 }
@@ -1014,6 +1030,10 @@ static void cellular__resync(void) {
         uart_flush_input(CELLULAR__PORT);
     }
     s_line_length = 0;
+    /* DTR is low again; the modem takes a moment to wake from its own sleep. */
+    bool awake = false;
+    for (int attempt = 0; attempt < 10 && !awake; ++attempt) awake = cellular__command("AT", 300);
+    if (!awake) ESP_LOGW(TAG, "modem did not wake after sleep");
     if (!cellular__poll_call()) {
         ESP_LOGW(TAG, "modem did not answer AT+CLCC after sleep");
         return;
@@ -1582,10 +1602,13 @@ int cellular__sleep_prepare(void) {
     s_sleep_sms_used = s_model.sms_used;
     s_sleep_sequence = s_message_sequence;
     cellular__unlock();
+    /* The modem sleeps too once idle (10-20 s); RI still reports calls and texts. */
+    cellular__set_dtr(true);
     return CONFIG_BRUCE_CELLULAR_RI_GPIO;
 }
 
 void cellular__sleep_done(bool ring) {
+    cellular__set_dtr(false);
     if (s_task == NULL || !s_alive) return;
     if (ring) ESP_LOGW(TAG, "woke by the modem's RI");
     s_after_sleep = true;
