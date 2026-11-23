@@ -1,0 +1,17 @@
+{
+  "appName": "Internet Radio",
+  "entryPoint": "app_main",
+  "appIcon": "icon:radio-handheld",
+  "coreAbiVersion": 4,
+  "permissions": [
+    "http",
+    "storage",
+    "config"
+  ],
+  "stackSize": 6144,
+  "heapSize": 196608,
+  "singleInstance": true,
+  "targets": [
+    "elf"
+  ]
+}

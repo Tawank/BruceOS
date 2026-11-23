@@ -10,7 +10,9 @@
 #include "core/config/config.h"
 #include "core/lib/lib.h"
 #include "core/process/process.h"
+#include "core_sdk/http.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 #include "freertos/FreeRTOS.h"
@@ -1124,9 +1126,10 @@ static const audio__codec_t s_audio_codecs[] = {
  * audio__file_play_process_cleanup() regardless of how the spawned process
  * ends (normal return, force-kill, or never starting at all). */
 typedef struct {
-    char *path;
+    char *path; /* or an http(s) URL when `url` */
     uint32_t token;
     const audio__codec_t *codec;
+    bool url;
 } audio__file_play_context_t;
 
 static int audio__file_play_process_entry(void *context) {
@@ -1193,6 +1196,12 @@ static void audio__file_play_process_cleanup(void *context) {
  * that's a straight tradeoff against the pipeline failing to open at all. */
 #define AUDIO__MP3_PCM_RING_FRAMES 1024u  /* stereo int16 frames, ~4KB */
 #define AUDIO__MP3_INPUT_RING_BYTES 8192u /* compressed bytes, ~0.5s at 128kbps */
+/* A network stream gets more lookahead, ~4 s at 128 kbps, to ride out Wi-Fi
+ * and mobile data hiccups; playback starts once a quarter of it is in. */
+#define AUDIO__URL_INPUT_RING_BYTES (64u * 1024u)
+#define AUDIO__URL_PREBUFFER_BYTES (AUDIO__URL_INPUT_RING_BYTES / 4u)
+#define AUDIO__URL_START_TIMEOUT_MS 15000u
+#define AUDIO__URL_READ_TIMEOUT_MS 15000u
 #define AUDIO__MP3_TRANSFER_FRAMES 256u
 /* Mirrors sdkconfig.defaults' CONFIG_AUDIO_SIMPLE_PLAYER_RESAMPLE_DEST_RATE:
  * every MP3, whatever its own sample rate, is resampled to this rate before
@@ -1203,12 +1212,15 @@ static void audio__file_play_process_cleanup(void *context) {
 
 typedef struct {
     SemaphoreHandle_t lock;
-    uint8_t *ring; /* AUDIO__MP3_INPUT_RING_BYTES long */
+    uint8_t *ring;
+    size_t ring_bytes;
     size_t write_pos;
     size_t read_pos;
     size_t filled;
     bruce_file_id_t file;
-    size_t file_size;
+    /* A network stream instead of `file`, until it ends. */
+    bruce_http_job_id_t http_job;
+    size_t file_size; /* SIZE_MAX for a stream, until it ends */
     size_t total_read; /* bytes pulled from `file` into the ring so far */
     /* Set (no lock needed -- see s_file_level_peak's identical reasoning)
      * right before an early user-requested stop, so audio__mp3_in_cb() can
@@ -1227,22 +1239,37 @@ typedef struct {
 static void audio__mp3_source_fill(audio__mp3_source_t *source) {
     if (source->total_read >= source->file_size) return;
     xSemaphoreTake(source->lock, portMAX_DELAY);
-    size_t free_bytes = AUDIO__MP3_INPUT_RING_BYTES - source->filled;
+    size_t free_bytes = source->ring_bytes - source->filled;
     size_t write_pos = source->write_pos;
     xSemaphoreGive(source->lock);
     if (free_bytes == 0) return;
 
-    size_t contiguous = AUDIO__MP3_INPUT_RING_BYTES - write_pos;
+    size_t contiguous = source->ring_bytes - write_pos;
     size_t want = free_bytes < contiguous ? free_bytes : contiguous;
     size_t remaining_in_file = source->file_size - source->total_read;
     if (want > remaining_in_file) want = remaining_in_file;
     if (want == 0) return;
 
     size_t got = 0;
-    if (storage__read(source->file, source->ring + write_pos, want, &got) != BRUCE_OK) return;
+    if (source->http_job != BRUCE_HTTP_JOB_ID_INVALID) {
+        int status = 0;
+        bruce_result_t read = http__request_read(source->http_job, source->ring + write_pos, want, &got, &status);
+        if (read == BRUCE_ERR_BUSY) return;
+        if (read != BRUCE_OK || got == 0 || status >= 400) {
+            /* Ended or failed; an error page is not audio. */
+            if (read == BRUCE_OK && got > 0) http__request_cancel(source->http_job);
+            source->http_job = BRUCE_HTTP_JOB_ID_INVALID;
+            xSemaphoreTake(source->lock, portMAX_DELAY);
+            source->file_size = source->total_read;
+            xSemaphoreGive(source->lock);
+            return;
+        }
+    } else if (storage__read(source->file, source->ring + write_pos, want, &got) != BRUCE_OK) {
+        return;
+    }
 
     xSemaphoreTake(source->lock, portMAX_DELAY);
-    source->write_pos = (source->write_pos + got) % AUDIO__MP3_INPUT_RING_BYTES;
+    source->write_pos = (source->write_pos + got) % source->ring_bytes;
     source->filled += got;
     xSemaphoreGive(source->lock);
     source->total_read += got;
@@ -1262,11 +1289,11 @@ static int audio__mp3_in_cb(uint8_t *data, int data_size, void *ctx) {
         size_t avail = source->filled;
         size_t chunk = want - got_total;
         if (chunk > avail) chunk = avail;
-        size_t contiguous = AUDIO__MP3_INPUT_RING_BYTES - source->read_pos;
+        size_t contiguous = source->ring_bytes - source->read_pos;
         size_t first = chunk < contiguous ? chunk : contiguous;
         if (first > 0) memcpy(data + got_total, source->ring + source->read_pos, first);
         if (chunk > first) memcpy(data + got_total + first, source->ring, chunk - first);
-        source->read_pos = (source->read_pos + chunk) % AUDIO__MP3_INPUT_RING_BYTES;
+        source->read_pos = (source->read_pos + chunk) % source->ring_bytes;
         source->filled -= chunk;
         bool eof = source->total_read >= source->file_size;
         bool stop_requested = source->stop_requested;
@@ -1342,27 +1369,60 @@ static int audio__mp3_event_cb(esp_asp_event_pkt_t *event, void *ctx) {
     return 0;
 }
 
+static void audio__mp3_input_close(bruce_file_id_t file, bruce_http_job_id_t http_job) {
+    if (http_job != BRUCE_HTTP_JOB_ID_INVALID) http__request_cancel(http_job);
+    if (file != BRUCE_FILE_ID_INVALID) storage__close(file);
+}
+
+/* An http(s) URL streams over Core's HTTP client: Wi-Fi or mobile data,
+ * redirects followed, read as it arrives, with no length limit. */
+static bruce_result_t audio__mp3_open_url(const char *url, bruce_http_job_id_t *out_job) {
+    static const char *const headers[] = {"User-Agent", "BruceOS/1.0", "Accept", "*/*"};
+    bruce_http_request_t request = {
+        .method = "GET",
+        .url = url,
+        .headers = headers,
+        .header_count = 2,
+        .timeout_ms = AUDIO__URL_READ_TIMEOUT_MS,
+        .max_response_bytes = SIZE_MAX,
+        .stream = true,
+    };
+    return http__request_start(&request, out_job);
+}
+
 static bruce_result_t
-audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t *codec) {
-    bruce_file_id_t file;
-    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
-        ESP_LOGE(TAG, "mp3: could not open %s", path);
-        audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
-        return BRUCE_ERR_UNSUPPORTED;
-    }
+audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t *codec, bool url) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_http_job_id_t http_job = BRUCE_HTTP_JOB_ID_INVALID;
     uint64_t file_size = 0;
-    if (storage__seek(file, 0, SEEK_END, &file_size) != BRUCE_OK || file_size == 0 ||
-        storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
-        ESP_LOGE(TAG, "mp3: could not determine size of %s", path);
-        storage__close(file);
-        audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
-        return BRUCE_ERR_UNSUPPORTED;
+    if (url) {
+        bruce_result_t started = audio__mp3_open_url(path, &http_job);
+        if (started != BRUCE_OK) {
+            ESP_LOGE(TAG, "mp3: could not open %s: %d", path, (int)started);
+            audio__file_publish_open_result(token, started);
+            return started;
+        }
+        file_size = SIZE_MAX;
+    } else {
+        if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
+            ESP_LOGE(TAG, "mp3: could not open %s", path);
+            audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
+            return BRUCE_ERR_UNSUPPORTED;
+        }
+        if (storage__seek(file, 0, SEEK_END, &file_size) != BRUCE_OK || file_size == 0 ||
+            storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
+            ESP_LOGE(TAG, "mp3: could not determine size of %s", path);
+            audio__mp3_input_close(file, http_job);
+            audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
+            return BRUCE_ERR_UNSUPPORTED;
+        }
     }
 
-    const void *input_ring_buffer = memory__external_malloc_writable(AUDIO__MP3_INPUT_RING_BYTES);
+    size_t ring_bytes = url ? AUDIO__URL_INPUT_RING_BYTES : AUDIO__MP3_INPUT_RING_BYTES;
+    const void *input_ring_buffer = memory__external_malloc_writable(ring_bytes);
     if (input_ring_buffer == NULL) {
         ESP_LOGE(TAG, "mp3: out of memory for input ring");
-        storage__close(file);
+        audio__mp3_input_close(file, http_job);
         audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1372,7 +1432,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
     if (pcm_ring_buffer == NULL) {
         ESP_LOGE(TAG, "mp3: out of memory for PCM ring");
         (void)memory__external_free(input_ring_buffer);
-        storage__close(file);
+        audio__mp3_input_close(file, http_job);
         audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1382,7 +1442,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
         ESP_LOGE(TAG, "mp3: audio__stream_open() failed: %d", (int)opened);
         (void)memory__external_free(pcm_ring_buffer);
         (void)memory__external_free(input_ring_buffer);
-        storage__close(file);
+        audio__mp3_input_close(file, http_job);
         audio__file_publish_open_result(token, opened);
         return opened;
     }
@@ -1390,8 +1450,10 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
     audio__mp3_source_t source = {0};
     source.lock = xSemaphoreCreateMutex();
     source.ring = (uint8_t *)input_ring_buffer;
+    source.ring_bytes = ring_bytes;
     source.file = file;
-    source.file_size = (size_t)file_size;
+    source.http_job = http_job;
+    source.file_size = url ? SIZE_MAX : (size_t)file_size;
 
     audio__mp3_pipe_t pipe = {0};
     pipe.lock = xSemaphoreCreateMutex();
@@ -1403,7 +1465,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
         (void)audio__stream_close();
         (void)memory__external_free(pcm_ring_buffer);
         (void)memory__external_free(input_ring_buffer);
-        storage__close(file);
+        audio__mp3_input_close(file, source.http_job);
         audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1425,7 +1487,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
     snprintf(uri, sizeof(uri), "raw://local/audio.%s", codec->uri_extension);
 
     for (;;) {
-        if (storage__seek(file, (int64_t)start_byte_offset, SEEK_SET, NULL) != BRUCE_OK) break;
+        if (!url && storage__seek(file, (int64_t)start_byte_offset, SEEK_SET, NULL) != BRUCE_OK) break;
         source.write_pos = 0;
         source.read_pos = 0;
         source.filled = 0;
@@ -1439,10 +1501,31 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
         /* Prime the input ring before the decoder's first pull so it doesn't
          * immediately starve waiting on this process's own (much slower,
          * polling) main loop below. */
-        while (source.filled < AUDIO__MP3_INPUT_RING_BYTES && source.total_read < source.file_size) {
+        if (url) {
+            /* Wait for some of the stream, so playback doesn't stutter at once. */
+            uint64_t deadline = runtime__now() + AUDIO__URL_START_TIMEOUT_MS;
+            while (source.filled < AUDIO__URL_PREBUFFER_BYTES && source.total_read < source.file_size &&
+                   runtime__now() < deadline && process__current_signal() == 0) {
+                size_t filled_before = source.filled;
+                audio__mp3_source_fill(&source);
+                if (source.filled == filled_before) (void)runtime__sleep(20u);
+            }
+        }
+        while (source.filled < ring_bytes && source.total_read < source.file_size) {
             size_t filled_before = source.filled;
             audio__mp3_source_fill(&source);
             if (source.filled == filled_before) break; /* a read failed; let the decoder discover EOF */
+        }
+        if (url && source.filled == 0) {
+            ESP_LOGE(TAG, "mp3: no audio from %s", path);
+            vSemaphoreDelete(source.lock);
+            vSemaphoreDelete(pipe.lock);
+            (void)audio__stream_close();
+            (void)memory__external_free(pcm_ring_buffer);
+            (void)memory__external_free(input_ring_buffer);
+            audio__mp3_input_close(file, source.http_job);
+            audio__file_publish_open_result(token, BRUCE_ERR_IO);
+            return BRUCE_ERR_IO;
         }
 
         esp_asp_cfg_t cfg = {
@@ -1462,7 +1545,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
             (void)audio__stream_close();
             (void)memory__external_free(pcm_ring_buffer);
             (void)memory__external_free(input_ring_buffer);
-            storage__close(file);
+            audio__mp3_input_close(file, source.http_job);
             audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
             return BRUCE_ERR_NO_MEMORY;
         }
@@ -1476,7 +1559,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
                 (void)audio__stream_close();
                 (void)memory__external_free(pcm_ring_buffer);
                 (void)memory__external_free(input_ring_buffer);
-                storage__close(file);
+                audio__mp3_input_close(file, source.http_job);
                 audio__file_publish_open_result(token, BRUCE_ERR_CANCELLED);
                 return BRUCE_ERR_CANCELLED;
             }
@@ -1556,7 +1639,8 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
                  * waiting on anything. */
                 source.stop_requested = true;
             }
-            if (poll.seek && !want_restart) {
+            /* A live stream can't seek; the request is just dropped. */
+            if (poll.seek && !want_restart && !url) {
                 /* Same reasoning as the stop case above: never call any
                  * esp_audio_simple_player_*() control API from here.
                  * Flagging early EOF drains this session down to a clean
@@ -1615,7 +1699,7 @@ audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t 
                  * rather than freezing at an early guess. */
                 if (s_mp3_position_ms > 300u) {
                     s_mp3_bitrate_bps = (uint32_t)(((uint64_t)source.total_read * 8000u) / s_mp3_position_ms);
-                    s_mp3_duration_ms = s_mp3_bitrate_bps > 0
+                    s_mp3_duration_ms = !url && s_mp3_bitrate_bps > 0
                                             ? (uint32_t)(((uint64_t)source.file_size * 8000u) / s_mp3_bitrate_bps)
                                             : 0;
                 }
@@ -1694,7 +1778,7 @@ done:
     vSemaphoreDelete(pipe.lock);
     (void)memory__external_free(pcm_ring_buffer);
     (void)memory__external_free(input_ring_buffer);
-    storage__close(file);
+    audio__mp3_input_close(file, source.http_job);
 
     bruce_resource_id_t resource = BRUCE_RESOURCE_ID_INVALID;
     if (process_registry__operation_begin()) {
@@ -1762,7 +1846,7 @@ static int audio__mp3_play_process_entry(void *context) {
         audio__file_publish_open_result(ctx->token, loaded);
         return 0;
     }
-    (void)audio__mp3_play_blocking(ctx->path, ctx->token, ctx->codec);
+    (void)audio__mp3_play_blocking(ctx->path, ctx->token, ctx->codec, ctx->url);
     audio__codec_libs_unload(&libs);
     return 0;
 }
@@ -1793,32 +1877,9 @@ bool audio__file_supported(const char *path) {
     return codec != NULL && audio__codec_available(codec);
 }
 
-bruce_result_t audio__file_play(const char *path) {
-    if (path == NULL || path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
-    size_t path_length = strlen(path);
-    if (path_length >= BRUCE_STORAGE_PATH_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
-
-    /* Quick synchronous validation so a bad path/format is reported to the
-     * caller immediately instead of silently failing in the background --
-     * closed right away because the spawned process below reopens the file
-     * itself (a storage handle can't cross processes). Cheap: this only
-     * reads the WAV header or probes the MP3's existence/size, never the
-     * full audio data. */
-    audio__wav_t probe;
-    bool is_wav = audio__wav_open(path, &probe);
-    if (is_wav) storage__close(probe.file);
-    const audio__codec_t *codec = is_wav ? NULL : audio__codec_for_path(path);
-    bool decodable = false;
-    if (codec != NULL && audio__codec_available(codec)) {
-        bruce_file_id_t probe_file;
-        if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &probe_file) == BRUCE_OK) {
-            uint64_t size = 0;
-            decodable = storage__seek(probe_file, 0, SEEK_END, &size) == BRUCE_OK && size > 0;
-            storage__close(probe_file);
-        }
-    }
-    if (!is_wav && !decodable) return BRUCE_ERR_UNSUPPORTED;
-
+/* Starts the player process for a file or URL; see audio__file_play(). */
+static bruce_result_t
+audio__file_spawn(const char *path, size_t path_length, const audio__codec_t *codec, bool is_wav, bool url) {
     audio__file_play_context_t *context = malloc(sizeof(*context));
     if (context == NULL) return BRUCE_ERR_NO_MEMORY;
     context->path = malloc(path_length + 1);
@@ -1828,6 +1889,7 @@ bruce_result_t audio__file_play(const char *path) {
     }
     memcpy(context->path, path, path_length + 1);
     context->codec = codec;
+    context->url = url;
 
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
@@ -1865,6 +1927,65 @@ bruce_result_t audio__file_play(const char *path) {
         return created;
     }
     return BRUCE_OK;
+}
+
+bruce_result_t audio__file_play(const char *path) {
+    if (path == NULL || path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t path_length = strlen(path);
+    if (path_length >= BRUCE_STORAGE_PATH_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* Quick synchronous validation so a bad path/format is reported to the
+     * caller immediately instead of silently failing in the background --
+     * closed right away because the spawned process below reopens the file
+     * itself (a storage handle can't cross processes). Cheap: this only
+     * reads the WAV header or probes the MP3's existence/size, never the
+     * full audio data. */
+    audio__wav_t probe;
+    bool is_wav = audio__wav_open(path, &probe);
+    if (is_wav) storage__close(probe.file);
+    const audio__codec_t *codec = is_wav ? NULL : audio__codec_for_path(path);
+    bool decodable = false;
+    if (codec != NULL && audio__codec_available(codec)) {
+        bruce_file_id_t probe_file;
+        if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &probe_file) == BRUCE_OK) {
+            uint64_t size = 0;
+            decodable = storage__seek(probe_file, 0, SEEK_END, &size) == BRUCE_OK && size > 0;
+            storage__close(probe_file);
+        }
+    }
+    if (!is_wav && !decodable) return BRUCE_ERR_UNSUPPORTED;
+
+    return audio__file_spawn(path, path_length, codec, is_wav, false);
+}
+
+/* The codec named by `format` ("mp3", "aac", ...), else by the URL's file
+ * extension, else MP3, the most common stream format. */
+static const audio__codec_t *audio__codec_for_url(const char *url, const char *format) {
+    char name[24];
+    if (format != NULL && format[0] != '\0') {
+        snprintf(name, sizeof(name), "x.%s", format);
+        return audio__codec_for_path(name);
+    }
+    const char *start = strstr(url, "://");
+    start = start != NULL ? start + 3 : url;
+    size_t length = strcspn(start, "?#");
+    char path[BRUCE_STORAGE_PATH_MAX];
+    snprintf(path, sizeof(path), "%.*s", (int)(length < sizeof(path) ? length : sizeof(path) - 1), start);
+    const audio__codec_t *codec = strchr(path, '/') != NULL ? audio__codec_for_path(strrchr(path, '/')) : NULL;
+    return codec != NULL ? codec : &s_audio_codecs[0];
+}
+
+bruce_result_t audio__url_play(const char *url, const char *format) {
+    if (url == NULL || (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    size_t url_length = strlen(url);
+    if (url_length >= BRUCE_AUDIO_URL_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_HTTP);
+    if (permission != BRUCE_OK) return permission;
+    const audio__codec_t *codec = audio__codec_for_url(url, format);
+    if (codec == NULL || !audio__codec_available(codec)) return BRUCE_ERR_UNSUPPORTED;
+    return audio__file_spawn(url, url_length, codec, false, true);
 }
 
 bruce_result_t audio__file_pause(void) {

@@ -156,6 +156,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 
 ### `http`
 
+- `audio__url_play` (audio.h)
 - `http__request` (http.h)
 - `http__request_start` (http.h)
 - `http_server__start` (http_server.h)
@@ -2820,6 +2821,7 @@ Returns the program name from the root argument list.
 | `BRUCE_AUDIO_MIN_FREQUENCY_HZ` | `20u` |
 | `BRUCE_AUDIO_MAX_FREQUENCY_HZ` | `20000u` |
 | `BRUCE_AUDIO_MAX_TONE_DURATION_MS` | `60000u` |
+| `BRUCE_AUDIO_URL_MAX` | `256` |
 
 ---
 
@@ -3071,6 +3073,43 @@ finish, say) can't mistake "hasn't opened yet" for "already finished".
 #### Permissions
 
 _Not permission-gated._
+
+
+---
+
+## audio__url_play()
+
+```c
+bruce_result_t audio__url_play(const char *url, const char *format);
+```
+
+Plays an http(s) audio stream, e.g. an internet radio station.
+
+The stream comes over Core's HTTP client (Wi-Fi or mobile data, redirects
+followed) and is decoded like a file: MP3 always, AAC, OGG and the rest
+when their codec library is in /lib. About 4 s is buffered ahead, and
+playback starts once about 1 s is in. Pause, resume, stop, volume and
+audio__file_is_open()/_is_playing() work as for a file; seeking is ignored
+and the duration is 0. Playback ends when the server ends the stream or the
+connection fails for 15 s.
+
+              to go by the URL's extension, else MP3.
+@return BRUCE_ERR_UNSUPPORTED for a codec this build can't decode.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `url` | `const char *` | http:// or https:// URL, shorter than BRUCE_AUDIO_URL_MAX. |
+| `format` | `const char *` | Codec as a file extension ("mp3", "aac", "ogg", ...), or NULL |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `http`
 
 
 ---

@@ -2040,6 +2040,16 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(audio__stream_writable_frames),
     ESP_ELFSYM_EXPORT(audio__stream_write),
     ESP_ELFSYM_EXPORT(audio__stream_close),
+    /* Playback control for audio__url_play(); audio__file_play() itself stays
+     * built-in, since its player opens files outside the app's permissions. */
+    ESP_ELFSYM_EXPORT(audio__url_play),
+    ESP_ELFSYM_EXPORT(audio__file_pause),
+    ESP_ELFSYM_EXPORT(audio__file_resume),
+    ESP_ELFSYM_EXPORT(audio__file_stop),
+    ESP_ELFSYM_EXPORT(audio__file_is_open),
+    ESP_ELFSYM_EXPORT(audio__file_is_playing),
+    ESP_ELFSYM_EXPORT(audio__file_level),
+    ESP_ELFSYM_EXPORT(audio__file_position_ms),
 
     /* Device state */
     ESP_ELFSYM_EXPORT(device__get_battery),
@@ -2064,6 +2074,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Read-only application preferences. Protected values enforce config
      * permission in Core. */
+    ESP_ELFSYM_EXPORT(config__get_sound_volume),
+    ESP_ELFSYM_EXPORT(config__set_sound_volume),
     ESP_ELFSYM_EXPORT(config__get_color_primary),
     ESP_ELFSYM_EXPORT(config__get_color_secondary),
     ESP_ELFSYM_EXPORT(config__get_color_background),

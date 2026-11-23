@@ -148,6 +148,28 @@ bool audio__file_supported(const char *path);
  */
 bruce_result_t audio__file_play(const char *path);
 
+/** Longest URL audio__url_play() takes, including the terminator. */
+#define BRUCE_AUDIO_URL_MAX 256
+
+/**
+ * @brief Plays an http(s) audio stream, e.g. an internet radio station.
+ *
+ * The stream comes over Core's HTTP client (Wi-Fi or mobile data, redirects
+ * followed) and is decoded like a file: MP3 always, AAC, OGG and the rest
+ * when their codec library is in /lib. About 4 s is buffered ahead, and
+ * playback starts once about 1 s is in. Pause, resume, stop, volume and
+ * audio__file_is_open()/_is_playing() work as for a file; seeking is ignored
+ * and the duration is 0. Playback ends when the server ends the stream or the
+ * connection fails for 15 s.
+ *
+ * @param url http:// or https:// URL, shorter than BRUCE_AUDIO_URL_MAX.
+ * @param format Codec as a file extension ("mp3", "aac", "ogg", ...), or NULL
+ *               to go by the URL's extension, else MP3.
+ * @return BRUCE_ERR_UNSUPPORTED for a codec this build can't decode.
+ * @permission http
+ */
+bruce_result_t audio__url_play(const char *url, const char *format);
+
 /**
  * @brief Pauses the file currently playing via audio__file_play(), without
  * closing it.
