@@ -389,6 +389,15 @@ hud_rect_t hud__button_rect(hud_button_t button, int width, int height) {
     rect.y = button == HUD_BUTTON_LOCATE    ? locate_y
              : button == HUD_BUTTON_ZOOM_OUT ? out_y
                                              : out_y - 4 - HUD_BUTTON_SIZE;
+    if (button == HUD_BUTTON_TURN_LEFT || button == HUD_BUTTON_TURN_RIGHT) {
+        rect.x = HUD_MARGIN;
+        rect.y = button == HUD_BUTTON_TURN_RIGHT ? out_y : out_y - 4 - HUD_BUTTON_SIZE;
+    }
+    if (button == HUD_BUTTON_MENU) {
+        int below_banner = HUD_MARGIN + hud__banner_height() + HUD_GAP;
+        rect.y -= 4 + HUD_BUTTON_SIZE;
+        if (rect.y < below_banner) rect.y = below_banner;
+    }
     return rect;
 }
 
@@ -398,6 +407,14 @@ static void hud__draw_button(hud_button_t button, const char *icon, bruce_displa
     hud_rect_t rect = hud__button_rect(button, width, height);
     display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
     hud__icon(icon, rect.x + inset, rect.y + inset, HUD_BUTTON_ICON, color);
+}
+
+static void hud__draw_menu_button(int width, int height) {
+    hud_rect_t rect = hud__button_rect(HUD_BUTTON_MENU, width, height);
+    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
+    for (int i = -1; i <= 1; ++i) {
+        display__fill_circle((int16_t)(rect.x + rect.w / 2 + i * 7), (int16_t)(rect.y + rect.h / 2), 2, HUD_TEXT);
+    }
 }
 
 /* Filled while there is a fix, orange while the map follows it. */
@@ -463,6 +480,11 @@ void hud__draw(const map_view_t *view, const hud_state_t *state, int width, int 
         hud__draw_button(HUD_BUTTON_ZOOM_OUT, "minus", HUD_TEXT, width, height);
     }
     if (state->locate_button) hud__draw_locate(state, width, height);
+    if (state->menu_button) hud__draw_menu_button(width, height);
+    if (state->turn_buttons) {
+        hud__draw_button(HUD_BUTTON_TURN_LEFT, "arrow-left-bold", HUD_TEXT, width, height);
+        hud__draw_button(HUD_BUTTON_TURN_RIGHT, "arrow-right-bold", HUD_TEXT, width, height);
+    }
     if (state->status != NULL) {
         hud__pill(state->status, state->status_icon, HUD_MARGIN, top, HUD_ACCENT);
         top += hud__pill_height() + 2;

@@ -17,6 +17,9 @@ typedef enum {
     HUD_BUTTON_ZOOM_IN,
     HUD_BUTTON_ZOOM_OUT,
     HUD_BUTTON_LOCATE,
+    HUD_BUTTON_MENU,
+    HUD_BUTTON_TURN_LEFT,  /* 3D view, left edge. */
+    HUD_BUTTON_TURN_RIGHT,
 } hud_button_t;
 
 typedef struct {
@@ -38,6 +41,8 @@ typedef struct {
     double me_lat;
     double me_lon;
     bool locate_button;  /* "My location" button, bottom right. */
+    bool menu_button;    /* "..." above the zoom buttons, opens the menu. */
+    bool turn_buttons;   /* Turn the 3D view, at the left edge. */
     bool following;      /* The map follows the GPS position. */
     const char *gps_status; /* Progress towards a fix, under the status. */
     bool speed;

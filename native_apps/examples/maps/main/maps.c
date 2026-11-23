@@ -11,6 +11,7 @@
 #include "search.h"
 #include "settings.h"
 #include "tiles.h"
+#include "view3d.h"
 
 #define MAPS_IDLE_DELAY_MS 30
 #define MAPS_PLACE_ZOOM 16
@@ -27,10 +28,12 @@
 #define MAPS_REROUTE_MS 15000
 #define MAPS_ARRIVED_M 25
 #define MAPS_ARRIVED_HINT_MS 5000
+#define MAPS_TURN_DEG 15.0f
 
 typedef struct {
     settings_t settings;
     map_view_t view;
+    view3d_t view3d;
     map_view_t start_view;
     tiles_t tiles;
     hud_state_t hud;
@@ -74,6 +77,7 @@ typedef struct {
 static int32_t maps__to_e6(double degrees) { return (int32_t)floor(degrees * 1000000.0 + 0.5); }
 
 static void maps__pan(maps_t *app, int dx, int dy) {
+    if (app->view3d.on) view3d__rotate_pan(&app->view3d, &dx, &dy);
     map_view__pan(&app->view, dx, dy);
     app->hud.following = false;
     app->dirty = true;
@@ -587,7 +591,7 @@ static void maps__follow(maps_t *app, geo_point_t me) {
     int32_t box_x = display__width() / 4;
     int32_t box_y = display__height() / 4;
     bool off_screen = abs(dx) > 2 * box_x || abs(dy) > 2 * box_y;
-    if (!display__is_epaper() || off_screen) {
+    if (!display__is_epaper() || off_screen || app->view3d.on) {
         app->view.center = me;
         return;
     }
@@ -618,6 +622,10 @@ static void maps__poll_gps(maps_t *app) {
     app->hud.me_lat = fix.latitude;
     app->hud.me_lon = fix.longitude;
     app->hud.speed_kmh = speed;
+    /* The 3D view faces the way of travel; standing still keeps the last heading. */
+    if (fix.speed_kmh >= 3.0f && view3d__set_heading(&app->view3d, fix.course_deg) && app->view3d.on) {
+        app->dirty = true;
+    }
     if (app->locate_pending) maps__locate(app);
     else if (app->hud.following) maps__follow(app, after);
     maps__navigate(app, now);
@@ -633,8 +641,21 @@ static void maps__toggle_big(maps_t *app) {
     settings__save_big(app->view.big);
 }
 
+static void maps__toggle_3d(maps_t *app) {
+    app->view3d.on = !app->view3d.on;
+    app->hud.turn_buttons = app->view3d.on && input__has_touch();
+    settings__save_3d(app->view3d.on);
+}
+
+/* Moving with GPS turns it back to the way of travel. */
+static void maps__turn(maps_t *app, float degrees) {
+    if (!app->view3d.on) return;
+    view3d__turn(&app->view3d, degrees);
+    app->dirty = true;
+}
+
 static void maps__menu(maps_t *app) {
-    enum { NAV_MODE, SEARCH, DIRECTIONS, STEPS, END_ROUTE, LOCATE, GPS_OFF, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
+    enum { NAV_MODE, SEARCH, DIRECTIONS, STEPS, END_ROUTE, LOCATE, GPS_OFF, CLEAR_PIN, VIEW_3D, ONLINE, BIG, EXIT, BACK };
     hud_nav_mode_t next_mode = maps__next_nav_mode(app);
     char nav_label[32];
     snprintf(nav_label, sizeof(nav_label), "Change to %s", s_nav_names[next_mode]);
@@ -647,6 +668,7 @@ static void maps__menu(maps_t *app) {
         [LOCATE] = {.label = "My location", .icon_name = "crosshairs-gps"},
         [GPS_OFF] = {.label = "Turn GPS off", .icon_name = "crosshairs"},
         [CLEAR_PIN] = {.label = "Clear pin", .icon_name = "map-marker"},
+        [VIEW_3D] = {.label = "3D view", .icon_name = "video-3d", .right_text = app->view3d.on ? "On" : "Off"},
         [ONLINE] = {.label = "Online tiles", .icon_name = "earth",
                     .right_text = app->tiles.online ? "On" : "Off"},
         [BIG] = {.label = "Bigger text", .icon_name = "format-size", .right_text = app->view.big ? "On" : "Off"},
@@ -677,6 +699,7 @@ static void maps__menu(maps_t *app) {
             case LOCATE: maps__locate(app); break;
             case GPS_OFF: maps__gps_off(app); break;
             case CLEAR_PIN: maps__clear_pin(app); break;
+            case VIEW_3D: maps__toggle_3d(app); break;
             case ONLINE: maps__toggle_online(app); break;
             case BIG: maps__toggle_big(app); break;
             case EXIT: app->running = false; break;
@@ -710,7 +733,12 @@ static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
         app->hud.zoom_buttons = true;
         app->touch_on_button = true;
         hud_rect_t search = hud__search_rect(&app->view, &app->hud, display__width());
-        if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->x, event->y)) maps__zoom(app, 1);
+        if (app->hud.menu_button && maps__hit_button(HUD_BUTTON_MENU, event->x, event->y)) maps__menu(app);
+        else if (app->hud.turn_buttons && maps__hit_button(HUD_BUTTON_TURN_LEFT, event->x, event->y)) {
+            maps__turn(app, -MAPS_TURN_DEG);
+        } else if (app->hud.turn_buttons && maps__hit_button(HUD_BUTTON_TURN_RIGHT, event->x, event->y)) {
+            maps__turn(app, MAPS_TURN_DEG);
+        } else if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->x, event->y)) maps__zoom(app, 1);
         else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->x, event->y)) maps__zoom(app, -1);
         else if (app->hud.locate_button && maps__hit_button(HUD_BUTTON_LOCATE, event->x, event->y)) {
             maps__locate(app);
@@ -736,7 +764,9 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
     int step_y = display__height() / 4;
     switch (event->code) {
         case BRUCE_INPUT_CODE_BACK:
+            /* Esc on a keyboard opens the menu, which has End route and Exit; a Back button keeps its shortcuts. */
             if (app->search.state != SEARCH_IDLE) search__cancel(&app->search);
+            else if (event->type == BRUCE_INPUT_KEY) maps__menu(app);
             else if (app->route_request.state != ROUTE_IDLE || app->route_wait_fix || maps__has_route(app)) {
                 maps__end_route(app);
             } else app->running = false;
@@ -751,6 +781,10 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
         case '=': maps__zoom(app, 1); break;
         case BRUCE_INPUT_CODE_ZOOM_OUT:
         case '-': maps__zoom(app, -1); break;
+        case 'q':
+        case 'Q': maps__turn(app, -MAPS_TURN_DEG); break;
+        case 'e':
+        case 'E': maps__turn(app, MAPS_TURN_DEG); break;
         case BRUCE_INPUT_CODE_NEXT: maps__step(app, 1); break;
         case BRUCE_INPUT_CODE_PREV: maps__step(app, -1); break;
         case BRUCE_INPUT_CODE_MENU: maps__menu(app); break;
@@ -783,8 +817,18 @@ static void maps__update_status(maps_t *app, size_t loading) {
 
 static bool maps__draw(maps_t *app, int width, int height) {
     if (display__begin_frame() != BRUCE_OK) return false;
-    map_view__draw(&app->view, &app->tiles, width, height);
-    hud__draw(&app->view, &app->hud, width, height);
+    if (app->view3d.on) {
+        /* The ground, route and markers in perspective; the HUD adds the rest. */
+        view3d__draw(&app->view3d, &app->view, &app->tiles, &app->hud, width, height);
+        hud_state_t flat = app->hud;
+        flat.route = NULL;
+        flat.pin = flat.me = false;
+        flat.following = true;
+        hud__draw(&app->view, &flat, width, height);
+    } else {
+        map_view__draw(&app->view, &app->tiles, width, height);
+        hud__draw(&app->view, &app->hud, width, height);
+    }
     display__present();
     return true;
 }
@@ -805,12 +849,14 @@ static void maps__save_view(maps_t *app) {
 
 typedef struct {
     const map_view_t *view;
+    const view3d_t *view3d;
     int width;
     int height;
 } maps_screen_t;
 
 static bool maps__keep_download(tile_key_t key, void *context) {
     const maps_screen_t *screen = context;
+    if (screen->view3d->on) return view3d__is_near(screen->view3d, key);
     return map_view__is_near(screen->view, key, screen->width, screen->height);
 }
 
@@ -847,12 +893,14 @@ static void maps__run(maps_t *app) {
             continue;
         }
 
-        maps_screen_t screen = {.view = &app->view, .width = width, .height = height};
+        maps_screen_t screen = {.view = &app->view, .view3d = &app->view3d, .width = width, .height = height};
         if (tiles__cancel_unless(&app->tiles, maps__keep_download, &screen)) app->stalled = false;
         if (tiles__poll(&app->tiles)) app->stalled = false;
 
         tile_key_t pending[MAPS_PENDING_MAX];
-        size_t count = map_view__pending(&app->view, &app->tiles, width, height, pending, MAPS_PENDING_MAX);
+        size_t count = app->view3d.on
+                           ? view3d__pending(&app->view3d, &app->view, &app->tiles, width, height, pending, MAPS_PENDING_MAX)
+                           : map_view__pending(&app->view, &app->tiles, width, height, pending, MAPS_PENDING_MAX);
         maps__update_status(app, count + app->tiles.download_count);
         if (app->dirty) {
             app->dirty = !maps__draw(app, width, height);
@@ -874,9 +922,12 @@ int app_main(int argc, char **argv) {
     settings__load(&app->settings);
     map_view__set(&app->view, app->settings.lat_e6 / 1e6, app->settings.lon_e6 / 1e6, app->settings.zoom);
     app->view.big = app->settings.big;
+    app->view3d.on = app->settings.view3d;
+    app->hud.turn_buttons = app->view3d.on && input__has_touch();
     app->start_view = app->view;
     app->gps_available = gps__is_available();
     app->hud.locate_button = app->gps_available && input__has_touch();
+    app->hud.menu_button = input__has_touch();
     int screen_width = display__screen_width();
     int screen_height = display__screen_height();
     int screen = screen_width > screen_height ? screen_width : screen_height;
