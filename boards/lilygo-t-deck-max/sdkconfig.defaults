@@ -2,8 +2,9 @@
 # e-paper, TCA8418 keyboard, CST3530 touch, XL9555 GPIO expander).
 #
 # Pins from LilyGO's TDeckMaxBoard.h (github.com/Xinyuan-LilyGO/T-Deck-MAX).
-# LoRa (SX1262), gyroscope and vibration motor have no driver in this HAL
-# yet; their XL9555 power enables are left off.
+# The XL9555 expander and what hangs off it (power rails, PWRKEY, audio
+# routing) are HAL devices in board.c. LoRa (SX1262), gyroscope and
+# vibration motor have no driver yet; their power enables are left off.
 CONFIG_IDF_TARGET="esp32s3"
 
 # ---- Chip, flash and memory ----
@@ -24,18 +25,13 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # ---- Board buses and power ----
 
-# Board I2C: keyboard, touch, XL9555, ES8311, BQ27220.
+# Board I2C: keyboard, touch, XL9555, ES8311, BQ27220. board.c's i2c0 owns
+# the bus; these stay for the code that still reads the pins from here.
 CONFIG_BRUCE_BOARD_I2C_ENABLED=y
 CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=13
 CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=14
 CONFIG_BRUCE_BOARD_I2C_FREQ_HZ=400000
 
-# XL9555 pins: 4 LoRa internal antenna, 6 speaker amplifier, 7 touch reset,
-# 9 keyboard reset (resets are active low). Pin 10 low routes audio from
-# the ES8311 rather than the modem.
-CONFIG_BRUCE_BOARD_XL9555_ENABLED=y
-CONFIG_BRUCE_BOARD_XL9555_I2C_ADDR=0x20
-CONFIG_BRUCE_BOARD_XL9555_OUTPUTS=0x02D0
 
 # Keep LoRa (CS 3, reset 4), SD (CS 48) and e-paper (CS 34) deselected on
 # the shared SPI bus from boot, as LilyGO's firmware does.
@@ -80,7 +76,7 @@ CONFIG_BRUCE_BATTERY_BQ27220_I2C_ADDR=0x55
 
 # ---- Storage ----
 
-# SD card on the display's bus.
+# SD card on the display's bus, board.c's spi2.
 CONFIG_BRUCE_SD_ENABLED=y
 CONFIG_BRUCE_SD_SPI_HOST=1
 CONFIG_BRUCE_SD_PIN_MOSI=33
@@ -103,24 +99,23 @@ CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED=y
 CONFIG_BRUCE_KEYBOARD_TCA8418_I2C_ADDR=0x34
 CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK=y
 
-# CST3530 touch, reset through the XL9555 above.
+# CST3530 touch, reset through the XL9555 (board.c).
 CONFIG_BRUCE_TOUCH_ENABLED=y
 CONFIG_BRUCE_TOUCH_CST3530=y
 CONFIG_BRUCE_TOUCH_I2C_ADDR=0x1A
 
 # ---- Radios ----
 
-# GPS: u-blox MIA-M10Q on UART at 38400, powered by XL9555 pin 2.
+# GPS: u-blox MIA-M10Q on UART at 38400, powered through board.c's "gps".
 CONFIG_BRUCE_GPS_ENABLED=y
 CONFIG_BRUCE_GPS_UART_PORT=1
 CONFIG_BRUCE_GPS_RX_GPIO=2
 CONFIG_BRUCE_GPS_TX_GPIO=16
 CONFIG_BRUCE_GPS_BAUD=38400
-CONFIG_BRUCE_GPS_POWER_XL9555_PIN=2
 
 # A7682E modem on UART2 at 115200 (ESP RX 11 = modem TXD, TX 10 = modem
-# RXD, as LilyGO's factory firmware opens it). XL9555 pin 0 powers it, pin 8
-# drives PWRKEY, pin 10 high routes the speaker and mic to it. RI is GPIO 7
+# RXD, as LilyGO's factory firmware opens it). Power, PWRKEY and audio
+# routing are board.c's "modem". RI is GPIO 7
 # and DTR GPIO 8 (BOARD_A7682E_RI/_DTR in LilyGO's TDeckMaxBoard.h).
 CONFIG_BRUCE_CELLULAR_ENABLED=y
 CONFIG_BRUCE_CELLULAR_UART_PORT=2
@@ -129,9 +124,6 @@ CONFIG_BRUCE_CELLULAR_TX_GPIO=10
 CONFIG_BRUCE_CELLULAR_BAUD=115200
 # Mobile data needs more than 115200's ~11 KB/s (AT+IPR, up to 3686400).
 CONFIG_BRUCE_CELLULAR_FAST_BAUD=921600
-CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN=0
-CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN=8
-CONFIG_BRUCE_CELLULAR_AUDIO_XL9555_PIN=10
 CONFIG_BRUCE_CELLULAR_RI_GPIO=7
 CONFIG_BRUCE_CELLULAR_DTR_GPIO=8
 # Mobile data: the modem selects lwIP PPP; IPv4 only and no VJ compression

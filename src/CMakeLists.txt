@@ -197,6 +197,13 @@ idf_component_register(SRCS
                     "modules/bnu/bnu_archive_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
+                    "hal/hal.c"
+                    "hal/hal_gpio.c"
+                    "hal/hal_i2c.c"
+                    "hal/hal_rail.c"
+                    "hal/hal_spi.c"
+                    "hal/drivers/gpio/xl9555.c"
+                    "modules/hal/hal_app.c"
                     "modules/clock/clock_app.c"
                     "modules/clock/clock_gui.c"
                     "modules/clock/clock_model.c"
@@ -343,6 +350,15 @@ idf_component_register(SRCS
                     "."
                       PRIV_INCLUDE_DIRS
                       ".")
+
+# The board's HAL devices (src/hal/hal.h): boards/<id>/board.c, or none.
+idf_build_get_property(bruce_board_id BRUCE_BOARD_ID)
+set(bruce_board_file "${CMAKE_CURRENT_LIST_DIR}/../boards/${bruce_board_id}/board.c")
+if(bruce_board_id AND EXISTS "${bruce_board_file}")
+    target_sources(${COMPONENT_LIB} PRIVATE "${bruce_board_file}")
+else()
+    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/hal/board_none.c")
+endif()
 
 target_link_options(${COMPONENT_LIB} INTERFACE
                     "LINKER:--wrap=jpeg_get_large"

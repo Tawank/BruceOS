@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core/device/device.h"
+#include "hal/hal.h"
 #include "core_sdk/permission.h"
 
 #include "esp_timer.h"
@@ -162,13 +162,8 @@ static gps_parser_t s_parser;
 
 static uint64_t gps__now(void) { return (uint64_t)(esp_timer_get_time() / 1000); }
 
-static void gps__power(bool on) {
-#if CONFIG_BRUCE_GPS_POWER_XL9555_PIN >= 0
-    (void)device__xl9555_set(CONFIG_BRUCE_GPS_POWER_XL9555_PIN, on);
-#else
-    (void)on;
-#endif
-}
+/* Through the board's "gps" device; nothing to do on boards that power it always. */
+static void gps__power(bool on) { (void)hal_device_power(hal_device_find("gps"), on); }
 
 void gps__power_off(void) { gps__power(false); }
 

@@ -64,6 +64,7 @@
 #include "modules/utils/storage_commands/storage_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
+#include "modules/hal/hal_app.h"
 #include "modules/speedtest/speedtest_app.h"
 #include "modules/wifi/wifi_app.h"
 
@@ -145,6 +146,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"bluetooth",            "Scan and manage Bluetooth devices",                         "Radio",   bluetooth_app_main,           0,     false},
     {"bluetooth_hid_app",    "Use Bruce as a Bluetooth HID peripheral",                   "Radio",   bluetooth_hid_app_main,       0,     false},
     {"device_bus",           "Inspect device buses",                                      "Radio",   device_bus_app_main,          3072,  false},
+    {"hal",                  "List the board's hardware devices and their state",          "Radio",   hal_app_main,                 3072,  false},
     {"gps",                  "Show the GPS position",                                     "Radio",   gps_app_main,                 0,     false},
     {"input",                "Inspect input devices",                                     "Radio",   input_app_main,               3072,  false},
     {"ir",                   "Control infrared devices",                                  "Radio",   ir_app_main,                  0,     false},

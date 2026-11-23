@@ -97,27 +97,6 @@ menu "Bruce hardware configuration"
                 For chip-selects and resets of devices sharing the SD card's
                 SPI bus that Bruce has no driver for, so they stay off the
                 bus. Set before storage and display init.
-
-        config BRUCE_BOARD_XL9555_ENABLED
-            bool "XL9555 GPIO expander on the board I2C bus"
-            depends on BRUCE_BOARD_I2C_ENABLED
-            default n
-            help
-                Sets all 16 XL9555 pins as outputs at boot: low for 20 ms,
-                which also pulses any active-low reset lines, then
-                BRUCE_BOARD_XL9555_OUTPUTS. Used for power enables and
-                reset lines, e.g. on the LilyGO T-Deck MAX.
-
-        config BRUCE_BOARD_XL9555_I2C_ADDR
-            hex "XL9555 I2C address"
-            depends on BRUCE_BOARD_XL9555_ENABLED
-            default 0x20
-
-        config BRUCE_BOARD_XL9555_OUTPUTS
-            hex "XL9555 output levels (bit n = pin n, port 1 is bits 8-15)"
-            depends on BRUCE_BOARD_XL9555_ENABLED
-            range 0x0 0xFFFF
-            default 0x0
     endmenu
 
     menu "Display"
@@ -1018,12 +997,6 @@ menu "Bruce hardware configuration"
             help
                 Tried first; with no data Core alternates with 9600 (or
                 38400 when this is 9600).
-
-        config BRUCE_GPS_POWER_XL9555_PIN
-            int "XL9555 pin that powers the receiver (-1 = always on)"
-            depends on BRUCE_GPS_ENABLED
-            range -1 15
-            default -1
     endmenu
 
     menu "Cellular"
@@ -1067,26 +1040,6 @@ menu "Bruce hardware configuration"
                 (those up to this value) with AT+IPR and keeps the first that
                 works. At 115200 the UART carries about 11 KB/s, less than a
                 128 kbps audio stream needs over mobile data.
-
-        config BRUCE_CELLULAR_POWER_XL9555_PIN
-            int "XL9555 pin that powers the modem"
-            depends on BRUCE_CELLULAR_ENABLED
-            range 0 15
-            default 0
-
-        config BRUCE_CELLULAR_PWRKEY_XL9555_PIN
-            int "XL9555 pin that drives the modem's PWRKEY"
-            depends on BRUCE_CELLULAR_ENABLED
-            range 0 15
-            default 8
-
-        config BRUCE_CELLULAR_AUDIO_XL9555_PIN
-            int "XL9555 pin that routes the speaker and mic to the modem (-1 = none)"
-            depends on BRUCE_CELLULAR_ENABLED
-            range -1 15
-            default -1
-            help
-                Driven high during a call and low again afterwards.
 
         config BRUCE_CELLULAR_RI_GPIO
             int "GPIO wired to the modem's RI pin (-1 = none)"

@@ -40,4 +40,6 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # apps built against the same file get the same configuration.
 idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_CURRENT_LIST_DIR}/src/core_sdk/lvgl" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "LV_KCONFIG_IGNORE" APPEND)
+# The board's HAL device list, boards/<id>/board.c (see src/CMakeLists.txt).
+idf_build_set_property(BRUCE_BOARD_ID "${BRUCE_BOARD_ID}")
 project(BruceIDF)

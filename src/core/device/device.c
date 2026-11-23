@@ -1,6 +1,7 @@
 #include "device.h"
 
 #include "board_i2c.h"
+#include "hal/hal.h"
 
 #include "core/display/display.h"
 #include "core/cellular/cellular.h"
@@ -241,52 +242,6 @@ bruce_result_t device__coredump_erase(void) {
 #endif
 }
 
-#if CONFIG_BRUCE_BOARD_XL9555_ENABLED
-/* All 16 pins become outputs: low for a moment (pulsing active-low resets),
- * then the board's levels. Registers 0x02/0x03 are the output ports,
- * 0x06/0x07 the direction (0 = output). */
-static i2c_master_dev_handle_t s_xl9555;
-static uint16_t s_xl9555_levels = CONFIG_BRUCE_BOARD_XL9555_OUTPUTS;
-static portMUX_TYPE s_xl9555_mux = portMUX_INITIALIZER_UNLOCKED;
-
-static void device__xl9555_init(void) {
-    i2c_master_bus_handle_t bus = board_i2c__acquire();
-    i2c_device_config_t config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = CONFIG_BRUCE_BOARD_XL9555_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-    };
-    if (bus == NULL || i2c_master_bus_add_device(bus, &config, &s_xl9555) != ESP_OK) return;
-
-    uint16_t levels = CONFIG_BRUCE_BOARD_XL9555_OUTPUTS;
-    uint8_t low[] = {0x02, 0x00, 0x00};
-    uint8_t outputs[] = {0x06, 0x00, 0x00};
-    uint8_t board[] = {0x02, (uint8_t)levels, (uint8_t)(levels >> 8)};
-    bool ok = i2c_master_transmit(s_xl9555, low, sizeof(low), 100) == ESP_OK &&
-              i2c_master_transmit(s_xl9555, outputs, sizeof(outputs), 100) == ESP_OK;
-    vTaskDelay(pdMS_TO_TICKS(20));
-    ok = ok && i2c_master_transmit(s_xl9555, board, sizeof(board), 100) == ESP_OK;
-    if (!ok) printf("XL9555 GPIO expander did not respond\n");
-}
-#endif
-
-bool device__xl9555_set(int pin, bool high) {
-#if CONFIG_BRUCE_BOARD_XL9555_ENABLED
-    if (s_xl9555 == NULL || pin < 0 || pin > 15) return false;
-    portENTER_CRITICAL(&s_xl9555_mux);
-    if (high) s_xl9555_levels |= (uint16_t)(1u << pin);
-    else s_xl9555_levels &= (uint16_t)~(1u << pin);
-    uint16_t levels = s_xl9555_levels;
-    portEXIT_CRITICAL(&s_xl9555_mux);
-    uint8_t data[] = {0x02, (uint8_t)levels, (uint8_t)(levels >> 8)};
-    return i2c_master_transmit(s_xl9555, data, sizeof(data), 100) == ESP_OK;
-#else
-    (void)pin;
-    (void)high;
-    return false;
-#endif
-}
-
 void device__power_hold_init(void) {
 #if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
     gpio_config_t cfg = {
@@ -305,9 +260,8 @@ void device__power_hold_init(void) {
     /* The levels hold; hand the pins back so the SD and display drivers claim them without a conflict warning. */
     (void)esp_gpio_revoke(CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK);
 #endif
-#if CONFIG_BRUCE_BOARD_XL9555_ENABLED
-    device__xl9555_init();
-#endif
+    /* Power enables and resets behind IO expanders come up with the board's HAL devices. */
+    hal__init();
 }
 
 #if defined(DEVICE__BATTERY_BACKEND_I2C)

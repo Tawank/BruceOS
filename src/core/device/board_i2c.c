@@ -2,6 +2,7 @@
 
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
+#include "hal/hal_i2c.h"
 
 #if CONFIG_BRUCE_BOARD_I2C_ENABLED
 
@@ -23,6 +24,9 @@ static void board_i2c__lock(void) {
 static void board_i2c__unlock(void) { xSemaphoreGive(s_mutex); }
 
 i2c_master_bus_handle_t board_i2c__acquire(void) {
+    /* A board that describes its bus in board.c owns it through the HAL. */
+    i2c_master_bus_handle_t hal_bus = hal_i2c_bus(hal_device_first(HAL_CLASS_I2C));
+    if (hal_bus != NULL) return hal_bus;
     board_i2c__lock();
     if (!s_init_attempted) {
         s_init_attempted = true;
@@ -43,6 +47,6 @@ i2c_master_bus_handle_t board_i2c__acquire(void) {
 
 #else
 
-i2c_master_bus_handle_t board_i2c__acquire(void) { return NULL; }
+i2c_master_bus_handle_t board_i2c__acquire(void) { return hal_i2c_bus(hal_device_first(HAL_CLASS_I2C)); }
 
 #endif

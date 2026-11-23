@@ -435,6 +435,23 @@ early with `runtime__timer_stop()` or block until the next tick with
 demote only itself without requiring the `process` permission; foregrounding
 also marks that app GUI-capable.
 
+### Hardware layer (src/hal)
+
+Boards describe their hardware as a tree of HAL devices in
+`boards/<id>/board.c` (buses, GPIO controllers such as IO expanders, power
+rails, chips), each bound to a driver, after Linux's device model and
+Zephyr's static devices. `hal__init()` probes them early in boot, parents
+first, deferring any whose bus, pin controller or rail isn't ready. Core
+code finds a device by role name (`hal_device_find("modem")`), asks for its
+pins by role and switches its power, without knowing whether a pin is an
+ESP GPIO or an expander pin; all of that is in the board file. A board
+without `board.c` has no HAL devices and those calls do nothing. Only the
+T-Deck MAX's buses (I2C, and the SPI host the SD card and e-paper share),
+its XL9555 and what that powers (GPS, modem power, PWRKEY, audio routing)
+have moved so far; `board_i2c__acquire()` returns the HAL's I2C bus there; the rest is still configured from Kconfig and
+moves one device class at a time. `src/hal/README.md` has the details; the
+`hal` command lists the devices and their state.
+
 ### Device state
 
 `device__get_battery()` returns a battery percentage from 0 through 100. The
@@ -450,7 +467,8 @@ module-owned.
 `gps__read()` (permission `gps`) returns the latest state of the board's
 NMEA receiver (`BRUCE_GPS_*` in Kconfig): position, altitude, speed,
 course, satellites, HDOP and UTC time from RMC and GGA sentences. The first
-call powers the receiver on (an XL9555 power enable on the T-Deck MAX) and
+call powers the receiver on (the board's HAL `gps` device, an XL9555 power
+rail on the T-Deck MAX) and
 starts a Core task that reads its UART; the task powers it off again after
 30 seconds without a call, and power-off cuts it before deep sleep. With no
 data Core alternates between the configured baud rate and 9600/38400. On
@@ -473,7 +491,8 @@ the signal bars are the `core.cellular` status icon, labelled 2G, 3G or 4G
 from the access technology in `+COPS` (`signal-<n>g-<bars>` icons, drawn
 on a 16x16 grid at 1.5 SVG units per pixel so they survive the status bar's
 scaling). A ringing call
-routes the speaker and mic to the modem (an XL9555 pin), shows a notification
+routes the speaker and mic to the modem (the HAL `modem` device's
+`audio-select` pin), shows a notification
 and runs `GUI=1 phone incoming` (the phone app is single-instance, so a
 running one comes to the front); a call that
 ends unanswered shows a missed-call notification. The last 16 ended calls

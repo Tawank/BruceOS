@@ -1,0 +1,91 @@
+# src/hal
+
+Bruce's hardware layer: a tree of devices described by the board and bound
+to drivers, after Linux's device model (buses, drivers, GPIO descriptors,
+regulators, deferred probe) and Zephyr's static device definitions.
+
+Only some hardware has moved here so far. Most is still set up from Kconfig
+(`src/Kconfig.projbuild`) by the code in `src/core`; it moves over one
+device class at a time.
+
+## Pieces
+
+- **Device** (`hal_device_t`, `hal.h`): constant data from the board (name,
+  driver, parent bus and address, pins by role, power rails, driver
+  settings) plus a small state record (`hal_device_state_t`). A device with
+  no driver is just a named set of pins and rails for code in `src/core`
+  that still drives the chip itself (`gps`, `modem` on the T-Deck MAX).
+- **Driver** (`hal_driver_t`): a name, a class, `probe`, optional
+  `suspend`/`resume`, and the class's operations (`api`). It never knows the
+  board: everything it needs comes from its device.
+- **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`), `HAL_CLASS_GPIO`
+  (`hal_gpio.h`), `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the
+  drivers that need them (battery, touch, display...).
+- **Pins** (`hal_pin_t`): a controller and a pin number. The controller is
+  NULL for the SoC's GPIO, or any GPIO-class device: an I2C expander pin
+  works exactly like an ESP pin. Levels are logical; `HAL_PIN_ACTIVE_LOW`
+  flips them.
+- **Rails**: a supply switched by a pin, counted on while any powered device
+  uses it (`hal_device_power()`).
+
+## Startup
+
+`hal__init()` (from `device__power_hold_init()`, early in boot) probes the
+board's devices in passes until nothing changes. A device is probed only
+once its bus, the controllers of its pins and its rails are ready; until
+then it waits (deferred probe), so the board may list devices in any
+order. A probe returning `BRUCE_ERR_NOT_FOUND` on a device marked
+`.optional` leaves it `absent` rather than `failed`; `BRUCE_ERR_BUSY` asks
+to be tried again on the next pass. `hal__suspend()`/`hal__resume()` walk
+the ready devices in reverse and forward probe order.
+
+The `hal` shell command lists every device with its driver, bus and state.
+
+## A board
+
+`boards/<id>/board.c` is built into the firmware when it exists, else
+`board_none.c` (no devices: lookups find nothing, power calls do nothing).
+
+```c
+static const hal_i2c_master_config_t i2c0_config = {.port = 0, .sda = 13, .scl = 14, .pullup = true};
+HAL_DEVICE(i2c0, .driver = &hal_i2c_master_driver, .config = &i2c0_config);
+HAL_DEVICE(xl9555, .driver = &xl9555_driver, .bus = &i2c0, .address = 0x20, .config = &xl9555_config);
+HAL_RAIL(gps_power, .enable = HAL_PIN(xl9555, 2));
+HAL_DEVICE(gps, HAL_RAILS(&gps_power));
+HAL_DEVICE(modem, HAL_PINS({"pwrkey", HAL_PIN(xl9555, 8)}), HAL_RAILS(&modem_power));
+HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &xl9555, &gps_power, &modem_power, &gps, &modem);
+```
+
+Device names are how code finds them, so they name the role (`gps`,
+`modem`), not the chip. Moving a pin to another controller, or a supply to
+another rail, changes only the board file.
+
+## Buses
+
+`hal_i2c_master_driver` and `hal_spi_master_driver` set up one of the
+ESP32's controllers from the board's pins. A chip's driver gets its handle
+with `hal_i2c_open()` or `hal_spi_open()` and never names a port, host or
+bus pin. Code in `src/core` that still sets up its own chips uses the same
+buses: `board_i2c__acquire()` returns the board's HAL I2C bus, and the SD
+card and display drivers find the SPI host already set up and only add
+their chip to it.
+
+## Using a device
+
+```c
+const hal_device_t *modem = hal_device_find("modem");   /* NULL: the board has none */
+hal_device_power(modem, true);                           /* its rails on */
+hal_pin_set(hal_device_pin(modem, "pwrkey"), true);      /* wherever that pin is */
+```
+
+Each call accepts NULL and does nothing, so code works on boards without
+the device.
+
+## A driver
+
+One file under `drivers/<class>/`, with a header giving its settings struct
+and `extern const hal_driver_t <chip>_driver;`. `probe` gets everything
+from the device: `hal_i2c_open(device, ...)` for its bus handle,
+`hal_device_pin(device, "reset")` for pins, `device->config` for settings,
+and keeps its own state in `device->state->data`. A board only links the
+drivers it names, so an unused driver costs no flash.

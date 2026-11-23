@@ -9,6 +9,8 @@
  * I2C API: the bus here is owned directly by these drivers, the same way
  * display_driver.c owns its own SPI bus.
  *
+ * On a board whose board.c declares an I2C bus, this is that HAL bus.
+ *
  * Returns NULL if BRUCE_BOARD_I2C_ENABLED is not set, or if bus creation
  * failed. Safe to call from multiple drivers/tasks; the bus is created once
  * and the handle is cached for the life of the process.

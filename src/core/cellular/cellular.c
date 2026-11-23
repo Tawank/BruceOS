@@ -9,6 +9,8 @@
 #include "core/clock/clock.h"
 #include "core/config/config.h"
 #include "core/device/device.h"
+#include "hal/hal.h"
+#include "hal/hal_gpio.h"
 #include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/clock.h"
@@ -621,17 +623,20 @@ static void cellular__lock(void) {
 
 static void cellular__unlock(void) { xSemaphoreGive(s_lock); }
 
-static void cellular__audio(bool modem) {
-#if CONFIG_BRUCE_CELLULAR_AUDIO_XL9555_PIN >= 0
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_AUDIO_XL9555_PIN, modem);
-#else
-    (void)modem;
-#endif
+/* The board's "modem" device: its supply, and pins by role. */
+static void cellular__modem_pin(const char *role, bool active) {
+    (void)hal_pin_set(hal_device_pin(hal_device_find("modem"), role), active);
 }
 
+static void cellular__supply(bool on) { (void)hal_device_power(hal_device_find("modem"), on); }
+
+static void cellular__pwrkey(bool pressed) { cellular__modem_pin("pwrkey", pressed); }
+
+static void cellular__audio(bool modem) { cellular__modem_pin("audio-select", modem); }
+
 void cellular__power_off(void) {
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN, false);
+    cellular__pwrkey(false);
+    cellular__supply(false);
     cellular__audio(false);
 }
 
@@ -841,19 +846,19 @@ static bool cellular__find_modem(void) {
 static bool cellular__power_on(void) {
     /* A modem left in sleep mode by a restart wakes up and stays up. */
     cellular__set_dtr(false);
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN, true);
+    cellular__pwrkey(false);
+    cellular__supply(true);
     s_powered = true;
     vTaskDelay(pdMS_TO_TICKS(1500));
     if (cellular__find_modem()) {
         cellular__speed_up();
         return true;
     }
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
+    cellular__pwrkey(false);
     vTaskDelay(pdMS_TO_TICKS(100));
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, true);
+    cellular__pwrkey(true);
     vTaskDelay(pdMS_TO_TICKS(1100));
-    (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
+    cellular__pwrkey(false);
     for (int attempt = 0; attempt < 20; ++attempt) {
         if (cellular__command("AT", 1000)) {
             cellular__speed_up();
