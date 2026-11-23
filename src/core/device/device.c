@@ -316,8 +316,14 @@ void device__power_hold_init(void) {
  * subscription of the caller's: that would close with the process that
  * happened to ask first, and miss every reading after it. */
 static volatile int s_cached_battery = -1;
+static volatile bool s_charging;
 
-void device__set_battery_internal(int percent) { s_cached_battery = percent; }
+void device__set_battery_internal(int percent, bool charging) {
+    s_charging = charging;
+    s_cached_battery = percent;
+}
+
+bool device__is_charging(void) { return s_charging; }
 
 int device__get_battery(void) {
     int percent = s_cached_battery;
@@ -445,4 +451,9 @@ int device__get_battery(void) {
 
 int device__get_battery(void) { return BRUCE_ERR_UNSUPPORTED; }
 
+#endif
+
+#if !defined(DEVICE__BATTERY_BACKEND_I2C)
+/* Only the I2C fuel gauges and PMICs report external power. */
+bool device__is_charging(void) { return false; }
 #endif

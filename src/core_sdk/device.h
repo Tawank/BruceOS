@@ -19,6 +19,14 @@
 int device__get_battery(void);
 
 /**
+ * @brief Whether external power is connected (charging, or full and plugged in).
+ *
+ * Read with the battery level (every 5 s), from the board's fuel gauge or
+ * power chip; false on boards that only measure the battery voltage.
+ */
+bool device__is_charging(void);
+
+/**
  * @brief Schedules a device restart after delay_ms.
  *
  * @param delay_ms Delay before restarting, in milliseconds.

@@ -16,4 +16,4 @@ bool device__xl9555_set(int pin, bool high);
 
 /* The latest battery level from an I2C gauge, set by device_bus; what
  * device__get_battery() returns on those boards. */
-void device__set_battery_internal(int percent);
+void device__set_battery_internal(int percent, bool charging);

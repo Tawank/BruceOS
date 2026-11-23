@@ -91,6 +91,52 @@ static void bruce_launcher__format_clock(char *out, size_t size) {
     else snprintf(out, size, "%02d:%02d", hour, time.minute);
 }
 
+#define BRUCE_LAUNCHER_BATTERY_W 17
+#define BRUCE_LAUNCHER_BATTERY_H 9
+#define BRUCE_LAUNCHER_BATTERY_LOW 15
+/* Bruce's font draws digits on rows 2-8 of a line. */
+#define BRUCE_LAUNCHER_DIGIT_TOP 2
+#define BRUCE_LAUNCHER_DIGIT_H 7
+
+/* A lightning bolt as tall as the digits, 5 x 7, MSB first. */
+static const uint8_t s_bruce_launcher_bolt[BRUCE_LAUNCHER_DIGIT_H] = {0x18, 0x30, 0x60, 0xF8, 0x30, 0x60, 0xC0};
+
+/* "[bolt] 85% [battery]" ending at `right`, centred on the digits of a text
+ * line drawn at `text_y`; the bolt while external power is connected, the
+ * error color when low. Returns the left edge. */
+static int bruce_launcher__draw_battery(const bruce_launcher_theme_t *theme, int right, int text_y, bool with_icon) {
+    int battery = device__get_battery();
+    if (battery < 0) return right;
+    bool charging = device__is_charging();
+    uint16_t color = !charging && battery <= BRUCE_LAUNCHER_BATTERY_LOW ? config__get_color_error() : theme->pri;
+    int digits_y = text_y + BRUCE_LAUNCHER_DIGIT_TOP;
+    int x = right;
+    if (with_icon) {
+        int body_y = digits_y - (BRUCE_LAUNCHER_BATTERY_H - BRUCE_LAUNCHER_DIGIT_H) / 2;
+        x -= 2;
+        display__fill_rect((int16_t)x, (int16_t)(body_y + 3), 2, BRUCE_LAUNCHER_BATTERY_H - 6, color);
+        x -= BRUCE_LAUNCHER_BATTERY_W;
+        display__draw_round_rect((int16_t)x, (int16_t)body_y, BRUCE_LAUNCHER_BATTERY_W, BRUCE_LAUNCHER_BATTERY_H, 2, color);
+        int inner = BRUCE_LAUNCHER_BATTERY_W - 4;
+        int fill = (battery * inner + 50) / 100;
+        if (battery > 0 && fill == 0) fill = 1;
+        if (fill > 0) display__fill_rect((int16_t)(x + 2), (int16_t)(body_y + 2), (int16_t)fill, BRUCE_LAUNCHER_BATTERY_H - 4, color);
+        x -= 3;
+    }
+    char text[16];
+    snprintf(text, sizeof(text), "%d%%", battery);
+    x -= (int)strlen(text) * BRUCE_LAUNCHER_FONT_ADVANCE;
+    display__set_text_color(color);
+    display__set_cursor((int16_t)x, (int16_t)text_y);
+    display__print(text);
+    display__set_text_color(theme->pri);
+    if (charging) {
+        x -= 2 + 5;
+        display__draw_bitmap((int16_t)x, (int16_t)digits_y, s_bruce_launcher_bolt, 5, BRUCE_LAUNCHER_DIGIT_H, color);
+    }
+    return x;
+}
+
 static void bruce_launcher__draw_compact_status(const bruce_launcher_theme_t *theme) {
     int w = display__width();
     display__fill_rect(0, 0, (int16_t)w, BRUCE_LAUNCHER_COMPACT_HEADER_H, theme->bg);
@@ -101,12 +147,7 @@ static void bruce_launcher__draw_compact_status(const bruce_launcher_theme_t *th
     bruce_launcher__format_clock(text, sizeof(text));
     display__set_cursor(3, 2);
     display__print(text);
-    int battery = device__get_battery();
-    if (battery >= 0) {
-        snprintf(text, sizeof(text), "%d%%", battery);
-        display__set_cursor((int16_t)(w - 3 - (int)strlen(text) * BRUCE_LAUNCHER_FONT_ADVANCE), 2);
-        display__print(text);
-    }
+    (void)bruce_launcher__draw_battery(theme, w - 3, 2, false);
 }
 
 static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme) {
@@ -136,25 +177,9 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     display__print(clock_text);
     int left_limit = clock_x + (int)strlen(clock_text) * BRUCE_LAUNCHER_FONT_ADVANCE + 3;
 
-    int x = w - BRUCE_LAUNCHER_BORDER_PAD - 8;
-    int battery = device__get_battery();
-    if (battery >= 0) {
-        int icon_x = x - 14;
-        int icon_y = 11;
-        display__draw_rect(icon_x, icon_y, 11, 9, theme->pri);
-        display__fill_rect(icon_x + 11, icon_y + 2, 3, 5, theme->pri);
-        int fill_width = battery * 7 / 100;
-        if (battery > 0 && fill_width == 0) fill_width = 1;
-        if (fill_width > 0) { display__fill_rect(icon_x + 2, icon_y + 2, fill_width, 5, theme->pri); }
-
-        char battery_text[12];
-        snprintf(battery_text, sizeof(battery_text), "%d%%", battery);
-        int text_width = (int)strlen(battery_text) * BRUCE_LAUNCHER_FONT_ADVANCE;
-        int text_x = icon_x - text_width - 3;
-        display__set_cursor(text_x, BRUCE_LAUNCHER_STATUS_TEXT_Y);
-        display__print(battery_text);
-        x = text_x - 3;
-    }
+    int right = w - BRUCE_LAUNCHER_BORDER_PAD - 8;
+    int x = bruce_launcher__draw_battery(theme, right, BRUCE_LAUNCHER_STATUS_TEXT_Y, true);
+    if (x != right) x -= 3;
 
     for (size_t i = count; i > 0; --i) {
         bruce_status_icon_t icon_value;

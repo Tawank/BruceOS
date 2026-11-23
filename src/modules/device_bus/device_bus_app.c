@@ -21,7 +21,7 @@
 #include "sdkconfig.h"
 
 #define DEVICE_BUS__POLL_PERIOD_MS 20
-#define DEVICE_BUS__BATTERY_POLL_PERIOD_MS 30000
+#define DEVICE_BUS__BATTERY_POLL_PERIOD_MS 5000
 #define DEVICE_BUS__BATTERY_RETRY_MS 2000
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE || !CONFIG_BRUCE_BATTERY_ENABLED
@@ -216,6 +216,9 @@ static void device_bus__touch_poll(i2c_master_bus_handle_t bus) {
 #define DEVICE_BUS__AXP2101_REG_ADC_ENABLE 0x30
 #define DEVICE_BUS__AXP2101_ADC_ENABLE_MASK 0x0F
 #define DEVICE_BUS__AXP2101_REG_BATTERY_PERCENT 0xA4
+/* STATUS1 bit 5: VBUS good (XPowersLib isVbusGood()). */
+#define DEVICE_BUS__AXP2101_REG_STATUS1 0x00
+#define DEVICE_BUS__AXP2101_VBUS_GOOD 0x20
 
 static i2c_master_dev_handle_t s_battery_dev;
 static bool s_battery_ready;
@@ -236,7 +239,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     return true;
 }
 
-static bool device_bus__battery_read(int *out_percent) {
+static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
     uint8_t reg = DEVICE_BUS__AXP2101_REG_BATTERY_PERCENT;
     int8_t raw = 0;
     if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, (uint8_t *)&raw, 1, -1) != ESP_OK) return false;
@@ -244,6 +247,10 @@ static bool device_bus__battery_read(int *out_percent) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
     *out_percent = percent;
+    reg = DEVICE_BUS__AXP2101_REG_STATUS1;
+    uint8_t status = 0;
+    if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, &status, 1, -1) != ESP_OK) return false;
+    *out_charging = (status & DEVICE_BUS__AXP2101_VBUS_GOOD) != 0;
     return true;
 }
 
@@ -252,6 +259,8 @@ static bool device_bus__battery_read(int *out_percent) {
 #define DEVICE_BUS__AXP192_REG_ADC_ENABLE 0x82
 #define DEVICE_BUS__AXP192_ADC_ENABLE_ALL 0xFF
 #define DEVICE_BUS__AXP192_REG_BATTERY_VOLTAGE 0x78
+#define DEVICE_BUS__AXP192_REG_POWER_STATUS 0x00
+#define DEVICE_BUS__AXP192_VBUS_PRESENT 0x20
 #define DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_NUM 11
 #define DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_DEN 10
 #define DEVICE_BUS__BATTERY_EMPTY_MV 3300
@@ -276,7 +285,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     return true;
 }
 
-static bool device_bus__battery_read(int *out_percent) {
+static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
     uint8_t reg = DEVICE_BUS__AXP192_REG_BATTERY_VOLTAGE;
     uint8_t raw[2] = {0};
     if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, raw, sizeof(raw), -1) != ESP_OK) return false;
@@ -288,12 +297,21 @@ static bool device_bus__battery_read(int *out_percent) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
     *out_percent = percent;
+    /* Power status bit 5: VBUS present (XPowersLib isVbusIn()). */
+    reg = DEVICE_BUS__AXP192_REG_POWER_STATUS;
+    uint8_t status = 0;
+    if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, &status, 1, -1) != ESP_OK) return false;
+    *out_charging = (status & DEVICE_BUS__AXP192_VBUS_PRESENT) != 0;
     return true;
 }
 
 #elif defined(DEVICE_BUS__BATTERY_BACKEND_BQ27220)
 
 #define DEVICE_BUS__BQ27220_REG_STATE_OF_CHARGE 0x2C
+/* BatteryStatus bit 0 (DSG) is set while discharging; clear means external
+ * power, charging or full (LilyGO's BQ27220 getIsCharging()). */
+#define DEVICE_BUS__BQ27220_REG_BATTERY_STATUS 0x0A
+#define DEVICE_BUS__BQ27220_DSG 0x01
 
 static i2c_master_dev_handle_t s_battery_dev;
 static bool s_battery_ready;
@@ -310,7 +328,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     return true;
 }
 
-static bool device_bus__battery_read(int *out_percent) {
+static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
     uint8_t reg = DEVICE_BUS__BQ27220_REG_STATE_OF_CHARGE;
     uint8_t raw[2] = {0};
     if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, raw, sizeof(raw), -1) != ESP_OK) return false;
@@ -318,6 +336,9 @@ static bool device_bus__battery_read(int *out_percent) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
     *out_percent = percent;
+    reg = DEVICE_BUS__BQ27220_REG_BATTERY_STATUS;
+    if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, raw, sizeof(raw), -1) != ESP_OK) return false;
+    *out_charging = (raw[0] & DEVICE_BUS__BQ27220_DSG) == 0;
     return true;
 }
 
@@ -326,8 +347,9 @@ static bool device_bus__battery_read(int *out_percent) {
 #if !defined(DEVICE_BUS__NO_I2C_BATTERY)
 static bool device_bus__battery_poll(i2c_master_bus_handle_t bus) {
     int percent = 0;
-    if (!device_bus__battery_ensure_device(bus) || !device_bus__battery_read(&percent)) return false;
-    device__set_battery_internal(percent);
+    bool charging = false;
+    if (!device_bus__battery_ensure_device(bus) || !device_bus__battery_read(&percent, &charging)) return false;
+    device__set_battery_internal(percent, charging);
     bruce_device_battery_message_t message = {.percent = percent};
     (void)pubsub__publish(BRUCE_DEVICE_TOPIC_BATTERY, &message, sizeof(message));
     return true;

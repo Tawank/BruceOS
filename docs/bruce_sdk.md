@@ -7239,6 +7239,24 @@ Analog-only boards estimate charge from battery voltage.
 
 ---
 
+## device__is_charging()
+
+```c
+bool device__is_charging(void);
+```
+
+Whether external power is connected (charging, or full and plugged in).
+
+Read with the battery level (every 5 s), from the board's fuel gauge or
+power chip; false on boards that only measure the battery voltage.
+
+### Returns
+
+`bool`
+
+
+---
+
 ## device__restart()
 
 ```c
@@ -14322,10 +14340,11 @@ bruce_result_t lvgl__begin(void);
 
 Sets up LVGL for the calling process.
 
-Creates a display the size of the process's viewport with Bruce's theme
-(the mono theme on e-paper), a keypad whose keys go to the default group
-(lv_group_get_default()), and a pointer for touch screens. BRUCE_OK when
-already set up.
+Creates a display the size of the process's viewport with Bruce's look
+(the configured theme colors, Bruce's font, flat buttons that fill with the
+primary color when focused and get a secondary outline when checked), a
+keypad whose keys go to the default group (lv_group_get_default()), and a
+pointer for touch screens. BRUCE_OK when already set up.
 
 ### Returns
 
@@ -14388,6 +14407,77 @@ Frees the calling process's LVGL; lvgl__begin() may follow again.
 ### Returns
 
 `void`
+
+
+---
+
+## lvgl__font()
+
+```c
+const lv_font_t *lvgl__font(int scale);
+```
+
+Bruce's own bitmap font, scaled up by whole pixels like display__set_text_size(): 1 is the default text, up to 4.
+
+LVGL's symbols (LV_SYMBOL_*) come from Montserrat as a fallback.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `scale` | `int` |  |
+
+### Returns
+
+`const lv_font_t *`
+
+
+---
+
+## lvgl__color()
+
+```c
+lv_color_t lvgl__color(uint16_t rgb565);
+```
+
+An LVGL color from a Bruce RGB565 color, e.g. config__get_color_text_muted().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `rgb565` | `uint16_t` |  |
+
+### Returns
+
+`lv_color_t`
+
+
+---
+
+## lvgl__icon_create()
+
+```c
+lv_obj_t *lvgl__icon_create(lv_obj_t *parent, const char *name, int32_t size);
+```
+
+Shows a built-in icon (core_sdk/icon.h) at `size` x `size` pixels.
+
+The icon takes the text color of the object, inherited from its parent, so
+an icon on a button changes with the button's focus. NULL for an unknown
+name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `parent` | `lv_obj_t *` |  |
+| `name` | `const char *` |  |
+| `size` | `int32_t` |  |
+
+### Returns
+
+`lv_obj_t *`
 
 
 ---
