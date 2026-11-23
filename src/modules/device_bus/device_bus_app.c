@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/hal_battery.h"
+#include "hal/hal_touch.h"
 #include "sdkconfig.h"
 
 #define DEVICE_BUS__POLL_PERIOD_MS 20
@@ -50,15 +51,17 @@
 #define DEVICE_BUS__TOUCH_REG_TD_STATUS 0x02
 #define DEVICE_BUS__TOUCH_REG_TOUCH1_XH 0x03
 
+#if !CONFIG_BRUCE_TOUCH_HAL
 static i2c_master_dev_handle_t s_touch_dev;
 static bool s_touch_ready;
+#endif
 static bool s_touch_prev_pressed;
 static int32_t s_touch_prev_x;
 static int32_t s_touch_prev_y;
 static int32_t s_touch_prev_key = -1;
 
 static void device_bus__touch_reset(void) {
-#if CONFIG_BRUCE_TOUCH_PIN_RST >= 0
+#if !CONFIG_BRUCE_TOUCH_HAL && CONFIG_BRUCE_TOUCH_PIN_RST >= 0
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << CONFIG_BRUCE_TOUCH_PIN_RST,
         .mode = GPIO_MODE_OUTPUT,
@@ -71,6 +74,23 @@ static void device_bus__touch_reset(void) {
 #endif
 }
 
+#if CONFIG_BRUCE_TOUCH_HAL
+/* The board's touch device: its driver resets, sets up and orients it. */
+static bool device_bus__touch_ensure_device(i2c_master_bus_handle_t bus) {
+    (void)bus;
+    return hal_device_first(HAL_CLASS_TOUCH) != NULL;
+}
+
+static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y, int32_t *out_key) {
+    hal_touch_report_t report;
+    (void)hal_touch_read(hal_device_first(HAL_CLASS_TOUCH), &report);
+    *out_key = report.key;
+    if (!report.pressed) return false;
+    *out_x = report.x;
+    *out_y = report.y;
+    return true;
+}
+#else
 static void device_bus__touch_apply_orientation(int32_t *x, int32_t *y) {
 #if CONFIG_BRUCE_TOUCH_SWAP_XY
     int32_t swapped = *x;
@@ -168,6 +188,7 @@ static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y, int32_t *out_
     return true;
 }
 #endif
+#endif /* CONFIG_BRUCE_TOUCH_HAL */
 
 static void device_bus__touch_publish(bruce_input_action_t action, int32_t x, int32_t y, int32_t key) {
     bruce_device_touch_message_t message = {.action = action, .x = x, .y = y, .key = key};

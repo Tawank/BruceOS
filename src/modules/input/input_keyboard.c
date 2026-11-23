@@ -10,6 +10,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/i2c.h"
+#include "hal/hal_keypad.h"
 
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -133,6 +134,19 @@ static bool s_kb_alt_held;
 static bool s_kb_initialized;
 
 #if CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
+static bool s_kb_tca_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
+#endif
+
+#if CONFIG_BRUCE_KEYBOARD_TCA8418_HAL
+static const hal_device_t *s_kb_keypad;
+
+static bool input__kb_tca_init(void) {
+    s_kb_keypad = hal_device_first(HAL_CLASS_KEYPAD);
+    return s_kb_keypad != NULL;
+}
+
+static bool input__kb_tca_next(hal_keypad_event_t *out) { return hal_keypad_next_event(s_kb_keypad, out) == BRUCE_OK; }
+#elif CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
 #define INPUT__TCA_REG_CFG 0x01
 #define INPUT__TCA_REG_INT_STAT 0x02
 #define INPUT__TCA_REG_KEY_LCK_EC 0x03
@@ -142,7 +156,7 @@ static bool s_kb_initialized;
 #define INPUT__TCA_REG_KP_GPIO3 0x1F
 
 static bruce_i2c_id_t s_kb_tca_bus = BRUCE_I2C_ID_INVALID;
-static bool s_kb_tca_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
+static uint8_t s_kb_tca_pending;
 
 static bool input__kb_tca_write(uint8_t reg, uint8_t value) {
     uint8_t data[] = {reg, value};
@@ -192,6 +206,25 @@ static bool input__kb_tca_init(void) {
     return input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x03) &&
            input__kb_tca_write(INPUT__TCA_REG_CFG, 0x01);
 }
+
+/* The next FIFO event, as the HAL's tca8418 driver reads it. */
+static bool input__kb_tca_next(hal_keypad_event_t *out) {
+    if (s_kb_tca_pending == 0) {
+        uint8_t count = 0;
+        if (!input__kb_tca_read(INPUT__TCA_REG_KEY_LCK_EC, &count)) return false;
+        s_kb_tca_pending = count & 0x0F;
+    }
+    uint8_t event = 0;
+    if (s_kb_tca_pending == 0 || !input__kb_tca_read(INPUT__TCA_REG_KEY_EVENT_A, &event) || (event & 0x7F) == 0) {
+        s_kb_tca_pending = 0;
+        (void)input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x01);
+        return false;
+    }
+    s_kb_tca_pending--;
+    uint8_t key = (uint8_t)((event & 0x7F) - 1);
+    *out = (hal_keypad_event_t){.row = key / 10, .col = key % 10, .pressed = (event & 0x80) != 0};
+    return true;
+}
 #endif
 
 #if CONFIG_BRUCE_KEYBOARD_ENABLED
@@ -215,28 +248,18 @@ static uint8_t input__kb_read_inputs(const int *pins) {
 
 static bool input__kb_scan(bool out_pressed[INPUT__KB_ROWS][INPUT__KB_COLS]) {
 #if CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
-    uint8_t count = 0;
-    if (!input__kb_tca_read(INPUT__TCA_REG_KEY_LCK_EC, &count)) return false;
-    count &= 0x0F;
-    while (count-- > 0) {
-        uint8_t event = 0;
-        if (!input__kb_tca_read(INPUT__TCA_REG_KEY_EVENT_A, &event) || (event & 0x7F) == 0) break;
-        uint8_t raw = (uint8_t)((event & 0x7F) - 1);
-        uint8_t controller_row = raw / 10;
-        uint8_t controller_col = raw % 10;
+    hal_keypad_event_t event;
+    while (input__kb_tca_next(&event)) {
 #if CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK
-        uint8_t x = (uint8_t)(INPUT__KB_COLS - 1 - controller_col);
-        uint8_t y = controller_row;
-        if (y < INPUT__KB_ROWS) s_kb_tca_pressed[y][x] = (event & 0x80) != 0;
+        uint8_t x = (uint8_t)(INPUT__KB_COLS - 1 - event.col);
+        uint8_t y = event.row;
+        if (y < INPUT__KB_ROWS) s_kb_tca_pressed[y][x] = event.pressed;
 #else
-        uint8_t x = (uint8_t)(controller_row * 2 + (controller_col > 3 ? 1 : 0));
-        uint8_t y = (uint8_t)((controller_col + 4) % 4);
-        if (controller_row < 7 && controller_col < 8 && x < INPUT__KB_COLS) {
-            s_kb_tca_pressed[y][x] = (event & 0x80) != 0;
-        }
+        uint8_t x = (uint8_t)(event.row * 2 + (event.col > 3 ? 1 : 0));
+        uint8_t y = (uint8_t)((event.col + 4) % 4);
+        if (event.row < 7 && event.col < 8 && x < INPUT__KB_COLS) s_kb_tca_pressed[y][x] = event.pressed;
 #endif
     }
-    (void)input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x01);
     memcpy(out_pressed, s_kb_tca_pressed, sizeof(s_kb_tca_pressed));
     for (int y = 0; y < INPUT__KB_ROWS; ++y) {
         for (int x = 0; x < INPUT__KB_COLS; ++x) {

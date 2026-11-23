@@ -3,6 +3,8 @@
 
 #include "hal/drivers/battery/bq27220.h"
 #include "hal/drivers/gpio/xl9555.h"
+#include "hal/drivers/keypad/tca8418.h"
+#include "hal/drivers/touch/cst3530.h"
 #include "hal/hal.h"
 #include "hal/hal_i2c.h"
 #include "hal/hal_rail.h"
@@ -17,12 +19,20 @@ HAL_DEVICE(i2c0, .driver = &hal_i2c_master_driver, .config = &i2c0_config);
 static const hal_spi_master_config_t spi2_config = {.host = SPI2_HOST, .sck = 36, .mosi = 33, .miso = 47, .max_transfer = 4096};
 HAL_DEVICE(spi2, .driver = &hal_spi_master_driver, .config = &spi2_config);
 
-/* Outputs at boot: 4 internal LoRa antenna, 6 speaker amplifier on,
- * 7 touch out of reset, 9 keyboard out of reset. */
-static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6) | (1u << 7) | (1u << 9)};
+/* Outputs at boot: 4 internal LoRa antenna, 6 speaker amplifier on. The
+ * rest stay low: touch (7) and keyboard (9) in reset until their drivers. */
+static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6)};
 HAL_DEVICE(xl9555, .driver = &xl9555_driver, .bus = &i2c0, .address = 0x20, .config = &xl9555_config);
 
 HAL_DEVICE(battery, .driver = &bq27220_driver, .bus = &i2c0, .address = 0x55);
+
+HAL_DEVICE(touch, .driver = &cst3530_driver, .bus = &i2c0, .address = 0x1A,
+           HAL_PINS({"reset", HAL_PIN_LOW(xl9555, 7)}));
+
+/* 4 rows and 10 columns, BlackBerry style. */
+static const tca8418_config_t keyboard_config = {.rows = 0x0F, .cols = 0x03FF};
+HAL_DEVICE(keyboard, .driver = &tca8418_driver, .bus = &i2c0, .address = 0x34, .config = &keyboard_config,
+           HAL_PINS({"reset", HAL_PIN_LOW(xl9555, 9)}));
 
 HAL_RAIL(modem_power, .enable = HAL_PIN(xl9555, 0));
 HAL_RAIL(gps_power, .enable = HAL_PIN(xl9555, 2));
@@ -35,4 +45,4 @@ HAL_DEVICE(modem,
                     {"audio-select", HAL_PIN(xl9555, 10)}), /* High: speaker and mic to the modem. */
            HAL_RAILS(&modem_power));
 
-HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &xl9555, &battery, &modem_power, &gps_power, &imu_power, &gps, &modem);
+HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);

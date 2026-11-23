@@ -677,9 +677,18 @@ menu "Bruce hardware configuration"
                     the microphone key is Esc/Back.
         endchoice
 
+        config BRUCE_KEYBOARD_TCA8418_HAL
+            bool "TCA8418 from the board file (board.c)"
+            depends on BRUCE_KEYBOARD_TCA8418_ENABLED
+            default n
+            help
+                The first keypad device in boards/<id>/board.c; its driver
+                (src/hal/drivers/keypad) has its address, reset pin and
+                matrix. The layout is still chosen above.
+
         config BRUCE_KEYBOARD_TCA8418_I2C_ADDR
             hex "TCA8418 I2C address"
-            depends on BRUCE_KEYBOARD_TCA8418_ENABLED
+            depends on BRUCE_KEYBOARD_TCA8418_ENABLED && !BRUCE_KEYBOARD_TCA8418_HAL
             range 0x08 0x77
             default 0x34
 
@@ -876,17 +885,24 @@ menu "Bruce hardware configuration"
 
             config BRUCE_TOUCH_CST3530
                 bool "Hynitron CST3530 / CST66xx"
+
+            config BRUCE_TOUCH_HAL
+                bool "Board file (board.c)"
+                help
+                    The first touch device in boards/<id>/board.c; its
+                    driver (src/hal/drivers/touch) has its address, reset
+                    pin and orientation.
         endchoice
 
         config BRUCE_TOUCH_I2C_ADDR
             hex "Touch controller I2C address"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default 0x1A if BRUCE_TOUCH_CST3530
             default 0x38
 
         config BRUCE_TOUCH_PIN_RST
             int "Touch controller RESET GPIO"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default -1
             range -1 48
             help
@@ -895,7 +911,7 @@ menu "Bruce hardware configuration"
 
         config BRUCE_TOUCH_PIN_INT
             int "Touch controller INT GPIO"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default -1
             range -1 48
             help
@@ -904,7 +920,7 @@ menu "Bruce hardware configuration"
 
         config BRUCE_TOUCH_SWAP_XY
             bool "Swap X/Y"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default n
             help
                 Set these three to match whatever
@@ -915,12 +931,12 @@ menu "Bruce hardware configuration"
 
         config BRUCE_TOUCH_MIRROR_X
             bool "Mirror X"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default n
 
         config BRUCE_TOUCH_MIRROR_Y
             bool "Mirror Y"
-            depends on BRUCE_TOUCH_ENABLED
+            depends on BRUCE_TOUCH_ENABLED && !BRUCE_TOUCH_HAL
             default n
     endmenu
 

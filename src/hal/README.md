@@ -19,9 +19,10 @@ device class at a time.
   `suspend`/`resume`, and the class's operations (`api`). It never knows the
   board: everything it needs comes from its device.
 - **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`),
-  `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_GPIO`
-  (`hal_gpio.h`), `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the
-  drivers that need them (touch, display...).
+  `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_TOUCH` (`hal_touch.h`),
+  `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_GPIO` (`hal_gpio.h`),
+  `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the drivers that need
+  them (display, audio codec...).
 - **Pins** (`hal_pin_t`): a controller and a pin number. The controller is
   NULL for the SoC's GPIO, or any GPIO-class device: an I2C expander pin
   works exactly like an ESP pin. Levels are logical; `HAL_PIN_ACTIVE_LOW`
@@ -78,6 +79,19 @@ and whether external power is in. A board that sets
 `CONFIG_BRUCE_BATTERY_BACKEND_HAL` gets its level from the first battery
 device in `board.c`: the `device_bus` process polls it with
 `hal_battery_read()` as it does the Kconfig backends.
+
+## Input
+
+A touch driver (`drivers/touch/`, e.g. `cst3530.c`) reports a point in
+screen pixels, turned by its board-given `hal_touch_orientation_t`, and
+any touch key held. A keypad driver (`drivers/keypad/`, e.g. `tca8418.c`)
+hands out matrix key changes one at a time; what a key means stays with
+the keyboard layout in `src/modules/input`. `CONFIG_BRUCE_TOUCH_HAL` and
+`CONFIG_BRUCE_KEYBOARD_TCA8418_HAL` make the `device_bus` and input
+processes use the board's first touch and keypad devices.
+
+Both drivers pulse their `reset` pin at probe and set the chip up on the
+first read, so boot doesn't wait for the chips to start.
 
 ## Using a device
 
