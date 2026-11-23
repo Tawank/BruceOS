@@ -1,0 +1,24 @@
+{
+  "appName": "Speed test",
+  "entryPoint": "speedtest_app_main",
+  "appIcon": "icon:arrow-up-down",
+  "coreAbiVersion": 4,
+  "permissions": [
+    "http",
+    "wifi",
+    "config"
+  ],
+  "stackSize": 6144,
+  "singleInstance": true,
+  "build": {
+    "sources": [
+      "speedtest_app.c"
+    ],
+    "includeDirs": [
+      "."
+    ],
+    "targets": [
+      "elf"
+    ]
+  }
+}

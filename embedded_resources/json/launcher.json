@@ -3,6 +3,7 @@
     "$WIFI_CONNECT_TEXT": "BG=1 wifi toggle",
     "$WIFI_AP_CONNECT_TEXT": "BG=1 wifi ap toggle",
     "Scan": "wifi scan",
+    "Speed test": "speedtest",
     "AP info": "terminal wifi ap info",
     "WebUI": "webui",
     "TCP": "nc",

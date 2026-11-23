@@ -765,6 +765,79 @@ static void cellular__set_dtr(bool sleep) {
     if (sleep) gpio_hold_en(pin);
 }
 
+/* Faster rates the A76XX takes with AT+IPR, best first; only those up to
+ * BRUCE_CELLULAR_FAST_BAUD and above the start rate are tried. */
+static const uint32_t s_fast_rates[] = {921600, 460800, 230400};
+
+static bool cellular__fast_rate_allowed(uint32_t baud) {
+    return baud <= (uint32_t)CONFIG_BRUCE_CELLULAR_FAST_BAUD && baud > (uint32_t)CONFIG_BRUCE_CELLULAR_BAUD;
+}
+
+/* A few tries: the first AT after a rate change can arrive garbled. */
+static bool cellular__answers_at(uint32_t baud) {
+    uart_set_baudrate(CELLULAR__PORT, baud);
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        uart_flush_input(CELLULAR__PORT);
+        if (cellular__command("AT", 500)) return true;
+    }
+    return false;
+}
+
+/* Asks the modem to change rate and follows it. When it can't be reached at
+ * the new rate, tells it (blindly, at that rate) to go back. */
+static bool cellular__switch_rate(uint32_t from, uint32_t to) {
+    char command[24];
+    snprintf(command, sizeof(command), "AT+IPR=%lu", (unsigned long)to);
+    if (!cellular__command(command, 2000)) return false;
+    vTaskDelay(pdMS_TO_TICKS(200));
+    if (cellular__answers_at(to)) return true;
+    ESP_LOGW(TAG, "modem did not answer at %lu baud", (unsigned long)to);
+    snprintf(command, sizeof(command), "AT+IPR=%lu\r", (unsigned long)from);
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        uart_write_bytes(CELLULAR__PORT, command, strlen(command));
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    if (!cellular__answers_at(from)) ESP_LOGE(TAG, "modem lost after a rate change");
+    return false;
+}
+
+/* Before CMUX, which keeps whatever rate is set. */
+static void cellular__speed_up(void) {
+    for (size_t i = 0; i < sizeof(s_fast_rates) / sizeof(s_fast_rates[0]); ++i) {
+        if (!cellular__fast_rate_allowed(s_fast_rates[i])) continue;
+        if (cellular__switch_rate(CONFIG_BRUCE_CELLULAR_BAUD, s_fast_rates[i])) {
+            ESP_LOGI(TAG, "modem link at %lu baud", (unsigned long)s_fast_rates[i]);
+            return;
+        }
+    }
+}
+
+/* The modem may still be on from before a restart, at a faster rate and in
+ * CMUX mode: try each rate, plainly and after closing the multiplexer. Moves
+ * it back to the start rate so speeding up starts from a known place. */
+static bool cellular__find_modem(void) {
+    static const uint8_t close_down[] = {CMUX_FLAG, 0x03, CMUX_UIH, 0x05, 0xC3, 0x01, 0xF2, CMUX_FLAG};
+    uint32_t rates[1 + sizeof(s_fast_rates) / sizeof(s_fast_rates[0])] = {CONFIG_BRUCE_CELLULAR_BAUD};
+    size_t rate_count = 1;
+    for (size_t i = 0; i < sizeof(s_fast_rates) / sizeof(s_fast_rates[0]); ++i) {
+        if (cellular__fast_rate_allowed(s_fast_rates[i])) rates[rate_count++] = s_fast_rates[i];
+    }
+    for (int closed = 0; closed < 2; ++closed) {
+        for (size_t i = 0; i < rate_count; ++i) {
+            if (closed) {
+                uart_set_baudrate(CELLULAR__PORT, rates[i]);
+                uart_write_bytes(CELLULAR__PORT, close_down, sizeof(close_down));
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+            if (!cellular__answers_at(rates[i])) continue;
+            if (i == 0) return true;
+            return cellular__switch_rate(rates[i], CONFIG_BRUCE_CELLULAR_BAUD);
+        }
+    }
+    uart_set_baudrate(CELLULAR__PORT, CONFIG_BRUCE_CELLULAR_BAUD);
+    return false;
+}
+
 static bool cellular__power_on(void) {
     /* A modem left in sleep mode by a restart wakes up and stays up. */
     cellular__set_dtr(false);
@@ -772,20 +845,20 @@ static bool cellular__power_on(void) {
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN, true);
     s_powered = true;
     vTaskDelay(pdMS_TO_TICKS(1500));
-    if (cellular__command("AT", 1500)) return true;
-    /* Still on in CMUX mode from before a restart: close the multiplexer. */
-    static const uint8_t close_down[] = {CMUX_FLAG, 0x03, CMUX_UIH, 0x05, 0xC3, 0x01, 0xF2, CMUX_FLAG};
-    uart_write_bytes(CELLULAR__PORT, close_down, sizeof(close_down));
-    vTaskDelay(pdMS_TO_TICKS(500));
-    uart_flush_input(CELLULAR__PORT);
-    if (cellular__command("AT", 1500)) return true;
+    if (cellular__find_modem()) {
+        cellular__speed_up();
+        return true;
+    }
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
     vTaskDelay(pdMS_TO_TICKS(100));
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, true);
     vTaskDelay(pdMS_TO_TICKS(1100));
     (void)device__xl9555_set(CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN, false);
     for (int attempt = 0; attempt < 20; ++attempt) {
-        if (cellular__command("AT", 1000)) return true;
+        if (cellular__command("AT", 1000)) {
+            cellular__speed_up();
+            return true;
+        }
     }
     return false;
 }

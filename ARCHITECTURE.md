@@ -508,7 +508,14 @@ before sleep announces a missed text.
 
 Mobile data (`cellular__set_data()`, `cellular__set_apn()`, saved as
 `cellular.data` and `cellular.apn`; Config > Mobile Data, `config mobile`) is lwIP PPP over the modem's CMUX
-multiplexer, so calls and texts keep working during a data link. Once the
+multiplexer, so calls and texts keep working during a data link. The modem
+starts at `BRUCE_CELLULAR_BAUD` (115200, about 11 KB/s, too slow for a
+128 kbps audio stream); once it answers, `AT+IPR` moves the link to
+the fastest of 921600, 460800 and 230400 that works, up to
+`BRUCE_CELLULAR_FAST_BAUD`, before CMUX, which keeps the rate it is given. A
+rate that fails is undone by sending `AT+IPR` back at that rate. The modem
+keeps its rate until it restarts, so after an ESP restart Core looks for it
+at every rate and moves it back to the start rate first. Once the
 modem is registered, Core sends `AT+CMUX=0` (basic mode, the modem's default
 frame size of 1500) and opens DLC 0 to 2. From then on the UART carries
 27.010 frames: a `cellular_mux` task splits them, AT traffic goes to DLC 1

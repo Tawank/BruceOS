@@ -64,6 +64,7 @@
 #include "modules/utils/storage_commands/storage_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
+#include "modules/speedtest/speedtest_app.h"
 #include "modules/wifi/wifi_app.h"
 
 // clang-format off
@@ -129,6 +130,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     /* Network - Wi-Fi, web, and remote-access tools. */
     {"browser",              "Browse web pages",                                          "Network", browser_app_main,             16384, false},
     {"curl",                 "Transfer data from URLs",                                   "Network", bnu_curl_app_main,            16384, false},
+    {"speedtest",            "Measure internet speed over Wi-Fi or mobile data",          "Network", speedtest_app_main,           6144,  true },
     {"ssh",                  "Connect to an SSH server",                                  "Network", ssh_app_main,                 16384, false},
     {"ssh-keygen",           "Generate SSH keys",                                         "Network", ssh_keygen_app_main,          16384, false},
     {"sftp",                 "Browse/download files over SFTP",                           "Network", sftp_app_main,                16384, false},

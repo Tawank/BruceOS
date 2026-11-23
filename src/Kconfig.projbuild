@@ -1024,7 +1024,9 @@ menu "Bruce hardware configuration"
             depends on BRUCE_GPS_ENABLED
             range -1 15
             default -1
+    endmenu
 
+    menu "Cellular"
         config BRUCE_CELLULAR_ENABLED
             bool "Built-in cellular modem"
             default n
@@ -1055,6 +1057,16 @@ menu "Bruce hardware configuration"
             int "Modem baud rate"
             depends on BRUCE_CELLULAR_ENABLED
             default 115200
+
+        config BRUCE_CELLULAR_FAST_BAUD
+            int "Fastest modem baud rate to try after start (0 = keep the one above)"
+            depends on BRUCE_CELLULAR_ENABLED
+            default 0
+            help
+                Once the modem answers, Core tries 921600, 460800 and 230400
+                (those up to this value) with AT+IPR and keeps the first that
+                works. At 115200 the UART carries about 11 KB/s, less than a
+                128 kbps audio stream needs over mobile data.
 
         config BRUCE_CELLULAR_POWER_XL9555_PIN
             int "XL9555 pin that powers the modem"

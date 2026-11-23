@@ -281,6 +281,7 @@ idf_component_register(SRCS
                     "modules/bparted/bparted_gui.c"
                     "modules/bparted/bparted_common.c"
                     "modules/wifi/wifi_app.c"
+                    "modules/speedtest/speedtest_app.c"
                     "modules/webui/webui_app.c"
                     "modules/webui/webui_http.c"
                     "modules/webui/webui_memory.c"
@@ -564,6 +565,12 @@ target_include_directories(bruce_sdk_builtin_config_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/config")
 
+add_library(bruce_sdk_builtin_speedtest_check OBJECT "modules/speedtest/speedtest_app.c")
+target_include_directories(bruce_sdk_builtin_speedtest_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/speedtest")
+bruce_use_lvgl(bruce_sdk_builtin_speedtest_check)
+
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -812,6 +819,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_bnu_check
     bruce_sdk_builtin_clock_check
     bruce_sdk_builtin_config_check
+    bruce_sdk_builtin_speedtest_check
     bruce_sdk_builtin_launcher_check
     bruce_sdk_builtin_wifi_check
     bruce_sdk_builtin_webui_check

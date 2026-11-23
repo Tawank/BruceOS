@@ -42,7 +42,9 @@
 #define HTTP_ASYNC__ORIGIN_MAX 128
 #define HTTP_ASYNC__HEADER_NAME_MAX 48
 #define HTTP_ASYNC__MIN_BUFFER 4096
-#define HTTP_ASYNC__STREAM_WINDOW 8192
+/* Apps sleep a 10 ms tick between reads, so this caps a stream at about
+ * 3 MB/s (8 KB held it to 0.8 MB/s). */
+#define HTTP_ASYNC__STREAM_WINDOW 32768
 
 typedef enum {
     HTTP_ASYNC__FREE,
