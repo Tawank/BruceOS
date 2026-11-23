@@ -1,6 +1,7 @@
 /* LilyGO T-Deck MAX: what the HAL drives so far. Wiring from LilyGO's
  * TDeckMaxBoard.h; more devices move here as their drivers join the HAL. */
 
+#include "hal/drivers/battery/bq27220.h"
 #include "hal/drivers/gpio/xl9555.h"
 #include "hal/hal.h"
 #include "hal/hal_i2c.h"
@@ -21,6 +22,8 @@ HAL_DEVICE(spi2, .driver = &hal_spi_master_driver, .config = &spi2_config);
 static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6) | (1u << 7) | (1u << 9)};
 HAL_DEVICE(xl9555, .driver = &xl9555_driver, .bus = &i2c0, .address = 0x20, .config = &xl9555_config);
 
+HAL_DEVICE(battery, .driver = &bq27220_driver, .bus = &i2c0, .address = 0x55);
+
 HAL_RAIL(modem_power, .enable = HAL_PIN(xl9555, 0));
 HAL_RAIL(gps_power, .enable = HAL_PIN(xl9555, 2));
 HAL_RAIL(imu_power, .enable = HAL_PIN(xl9555, 3)); /* BHI260AP's 1.8 V, for when it has a driver. */
@@ -32,4 +35,4 @@ HAL_DEVICE(modem,
                     {"audio-select", HAL_PIN(xl9555, 10)}), /* High: speaker and mic to the modem. */
            HAL_RAILS(&modem_power));
 
-HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &xl9555, &modem_power, &gps_power, &imu_power, &gps, &modem);
+HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &xl9555, &battery, &modem_power, &gps_power, &imu_power, &gps, &modem);

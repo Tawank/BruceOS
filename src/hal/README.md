@@ -18,9 +18,10 @@ device class at a time.
 - **Driver** (`hal_driver_t`): a name, a class, `probe`, optional
   `suspend`/`resume`, and the class's operations (`api`). It never knows the
   board: everything it needs comes from its device.
-- **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`), `HAL_CLASS_GPIO`
+- **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`),
+  `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_GPIO`
   (`hal_gpio.h`), `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the
-  drivers that need them (battery, touch, display...).
+  drivers that need them (touch, display...).
 - **Pins** (`hal_pin_t`): a controller and a pin number. The controller is
   NULL for the SoC's GPIO, or any GPIO-class device: an I2C expander pin
   works exactly like an ESP pin. Levels are logical; `HAL_PIN_ACTIVE_LOW`
@@ -69,6 +70,14 @@ bus pin. Code in `src/core` that still sets up its own chips uses the same
 buses: `board_i2c__acquire()` returns the board's HAL I2C bus, and the SD
 card and display drivers find the SPI host already set up and only add
 their chip to it.
+
+## Battery
+
+A battery-class driver (`drivers/battery/`, e.g. `bq27220.c`) reads charge
+and whether external power is in. A board that sets
+`CONFIG_BRUCE_BATTERY_BACKEND_HAL` gets its level from the first battery
+device in `board.c`: the `device_bus` process polls it with
+`hal_battery_read()` as it does the Kconfig backends.
 
 ## Using a device
 

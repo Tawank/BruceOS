@@ -18,6 +18,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "hal/hal_battery.h"
 #include "sdkconfig.h"
 
 #define DEVICE_BUS__POLL_PERIOD_MS 20
@@ -32,6 +33,8 @@
 #define DEVICE_BUS__BATTERY_BACKEND_AXP192 1
 #elif CONFIG_BRUCE_BATTERY_BACKEND_BQ27220
 #define DEVICE_BUS__BATTERY_BACKEND_BQ27220 1
+#elif CONFIG_BRUCE_BATTERY_BACKEND_HAL
+#define DEVICE_BUS__BATTERY_BACKEND_HAL 1
 #else
 /* The analog ADC backend has no bus-sharing concern and is read directly by
  * device.c instead of through this process. */
@@ -339,6 +342,21 @@ static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
     reg = DEVICE_BUS__BQ27220_REG_BATTERY_STATUS;
     if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, raw, sizeof(raw), -1) != ESP_OK) return false;
     *out_charging = (raw[0] & DEVICE_BUS__BQ27220_DSG) == 0;
+    return true;
+}
+
+#elif defined(DEVICE_BUS__BATTERY_BACKEND_HAL)
+
+static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
+    (void)bus;
+    return hal_device_first(HAL_CLASS_BATTERY) != NULL;
+}
+
+static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
+    hal_battery_reading_t reading;
+    if (hal_battery_read(hal_device_first(HAL_CLASS_BATTERY), &reading) != BRUCE_OK) return false;
+    *out_percent = reading.percent;
+    *out_charging = reading.charging;
     return true;
 }
 

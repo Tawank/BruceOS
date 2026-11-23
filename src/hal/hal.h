@@ -27,6 +27,7 @@ typedef enum {
     HAL_CLASS_SPI,
     HAL_CLASS_GPIO,
     HAL_CLASS_RAIL,
+    HAL_CLASS_BATTERY,
     HAL_CLASS_COUNT,
 } hal_class_t;
 

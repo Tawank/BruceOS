@@ -479,6 +479,12 @@ menu "Bruce hardware configuration"
             config BRUCE_BATTERY_BACKEND_ADC
                 bool "Raw ADC1 channel"
 
+            config BRUCE_BATTERY_BACKEND_HAL
+                bool "Board file (board.c)"
+                help
+                    The first battery device in boards/<id>/board.c, such
+                    as a BQ27220 (src/hal/drivers/battery).
+
             config BRUCE_BATTERY_BACKEND_AXP2101
                 bool "AXP2101 PMIC (I2C)"
                 depends on BRUCE_BOARD_I2C_ENABLED

@@ -45,7 +45,7 @@
 #if CONFIG_BRUCE_QEMU_TEST_MODE || !CONFIG_BRUCE_BATTERY_ENABLED
 #define DEVICE__NO_BATTERY 1
 #elif CONFIG_BRUCE_BATTERY_BACKEND_AXP2101 || CONFIG_BRUCE_BATTERY_BACKEND_AXP192 ||                         \
-    CONFIG_BRUCE_BATTERY_BACKEND_BQ27220
+    CONFIG_BRUCE_BATTERY_BACKEND_BQ27220 || CONFIG_BRUCE_BATTERY_BACKEND_HAL
 /* All I2C fuel-gauge/PMIC backends are read the same way from here: the
  * device_bus process (modules/device_bus/) is the sole
  * owner of the shared board I2C bus; it hands each reading to
