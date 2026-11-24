@@ -31,11 +31,6 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_BRUCE_BOARD_I2C_ENABLED=y
 CONFIG_BRUCE_BOARD_I2C_HAL=y
 
-
-# Keep LoRa (CS 3, reset 4), SD (CS 48) and e-paper (CS 34) deselected on
-# the shared SPI bus from boot, as LilyGO's firmware does.
-CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK=0x1000400000018
-
 # ---- Display ----
 
 # E-paper on spi2, shared with the SD card; its pins are board.c's

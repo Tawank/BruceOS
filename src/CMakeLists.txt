@@ -200,6 +200,7 @@ idf_component_register(SRCS
                     "hal/hal.c"
                     "hal/hal_battery.c"
                     "hal/hal_gpio.c"
+                    "hal/hal_hog.c"
                     "hal/hal_i2c.c"
                     "hal/hal_keypad.c"
                     "hal/hal_rail.c"

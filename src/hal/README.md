@@ -29,6 +29,9 @@ device class at a time.
   flips them.
 - **Rails**: a supply switched by a pin, counted on while any powered device
   uses it (`hal_device_power()`).
+- **Hogs** (`hal_hog.h`): pins held active or inactive from boot, for chips
+  with no driver yet or that must stay quiet until theirs runs (Linux's
+  GPIO hogs), such as chip selects on a shared SPI bus.
 
 ## Startup
 

@@ -107,14 +107,6 @@ menu "Bruce hardware configuration"
             depends on BRUCE_BOARD_I2C_ENABLED && !BRUCE_BOARD_I2C_HAL
             default 400000
             range 100000 1000000
-
-        config BRUCE_BOARD_GPIO_HIGH_MASK
-            hex "GPIOs driven high at boot (bit n = GPIO n)"
-            default 0x0
-            help
-                For chip-selects and resets of devices sharing the SD card's
-                SPI bus that Bruce has no driver for, so they stay off the
-                bus. Set before storage and display init.
     endmenu
 
     menu "Display"

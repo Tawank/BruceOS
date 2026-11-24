@@ -6,9 +6,17 @@
 #include "hal/drivers/keypad/tca8418.h"
 #include "hal/drivers/touch/cst3530.h"
 #include "hal/hal.h"
+#include "hal/hal_hog.h"
 #include "hal/hal_i2c.h"
 #include "hal/hal_rail.h"
 #include "hal/hal_spi.h"
+
+/* Off the shared SPI bus from boot, as LilyGO's firmware does: LoRa (no
+ * driver yet), and the SD card and e-paper until their drivers take over. */
+static const hal_hog_config_t spi2_quiet_config = {.active = false};
+HAL_DEVICE(spi2_quiet, .driver = &hal_hog_driver, .config = &spi2_quiet_config,
+           HAL_PINS({"lora-cs", HAL_SOC_PIN_LOW(3)}, {"lora-reset", HAL_SOC_PIN_LOW(4)},
+                    {"sd-cs", HAL_SOC_PIN_LOW(48)}, {"display-cs", HAL_SOC_PIN_LOW(34)}));
 
 /* Keyboard, touch, XL9555, ES8311, BQ27220. */
 static const hal_i2c_master_config_t i2c0_config = {.port = 0, .sda = 13, .scl = 14, .pullup = true, .speed_hz = 400000};
@@ -52,4 +60,4 @@ HAL_DEVICE(modem,
                     {"audio-select", HAL_PIN(xl9555, 10)}), /* High: speaker and mic to the modem. */
            HAL_RAILS(&modem_power));
 
-HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);
+HAL_BOARD("LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);

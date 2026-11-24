@@ -20,7 +20,6 @@
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
-#include "esp_private/esp_gpio_reserve.h"
 #include "esp_sleep.h"
 #include "sdkconfig.h"
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
@@ -251,16 +250,7 @@ void device__power_hold_init(void) {
     gpio_config(&cfg);
     gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 1);
 #endif
-#if CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK
-    gpio_config_t high = {.pin_bit_mask = CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK, .mode = GPIO_MODE_OUTPUT};
-    gpio_config(&high);
-    for (int pin = 0; pin < 64; ++pin) {
-        if ((uint64_t)CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK & (1ULL << pin)) gpio_set_level((gpio_num_t)pin, 1);
-    }
-    /* The levels hold; hand the pins back so the SD and display drivers claim them without a conflict warning. */
-    (void)esp_gpio_revoke(CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK);
-#endif
-    /* Power enables and resets behind IO expanders come up with the board's HAL devices. */
+    /* Power enables, resets and pins held from boot come up with the board's HAL devices. */
     hal__init();
 }
 
