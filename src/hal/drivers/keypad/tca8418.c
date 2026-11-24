@@ -17,11 +17,14 @@
 #define TCA8418_SPEED_HZ 400000
 #define TCA8418_TIMEOUT_MS 20
 #define TCA8418_RESET_MS 10
+#define TCA8418_CHECK_MS 1000 /* Reads anyway this often, in case an edge was missed. */
 
 typedef struct {
     i2c_master_dev_handle_t i2c;
     bool configured;
     uint8_t pending; /* Events left of the count last read. */
+    const hal_pin_t *irq;
+    TickType_t checked_at;
 } tca8418_t;
 
 static bool tca8418__write(tca8418_t *chip, uint8_t reg, uint8_t value) {
@@ -49,13 +52,14 @@ static bruce_result_t tca8418__probe(const hal_device_t *device) {
         vTaskDelay(pdMS_TO_TICKS(TCA8418_RESET_MS));
         (void)hal_pin_set(reset, false);
     }
+    const hal_pin_t *irq = hal_device_pin(device, "interrupt");
+    if (hal_pin_irq_enable(irq) == BRUCE_OK) chip->irq = irq;
     device->state->data = chip;
     return BRUCE_OK;
 }
 
 /* Selects the matrix, drops events from power-on and enables the key
- * interrupt. Polling the FIFO stays authoritative, so a missed interrupt
- * never leaves a key stuck. */
+ * interrupt (INT low while K_INT is set). */
 static bool tca8418__configure(tca8418_t *chip, const tca8418_config_t *config) {
     if (!tca8418__write(chip, TCA8418_KP_GPIO1, config->rows) ||
         !tca8418__write(chip, TCA8418_KP_GPIO2, (uint8_t)config->cols) ||
@@ -81,14 +85,24 @@ static bruce_result_t tca8418__next_event(const hal_device_t *device, hal_keypad
         chip->configured = true;
     }
     if (chip->pending == 0) {
+        /* Only on an interrupt; with no interrupt pin, every call. */
+        TickType_t now = xTaskGetTickCount();
+        if (chip->irq != NULL && !hal_pin_irq_take(chip->irq) &&
+            now - chip->checked_at < pdMS_TO_TICKS(TCA8418_CHECK_MS)) {
+            return BRUCE_ERR_NOT_FOUND;
+        }
+        /* Cleared before the count is read: a key after this raises INT again. */
+        if (!tca8418__write(chip, TCA8418_INT_STAT, 0x01)) return BRUCE_ERR_IO;
         uint8_t count = 0;
         if (!tca8418__read(chip, TCA8418_KEY_LCK_EC, &count)) return BRUCE_ERR_IO;
+        chip->checked_at = now;
         chip->pending = count & 0x0F;
+        if (chip->pending == 0) return BRUCE_ERR_NOT_FOUND;
     }
     uint8_t event = 0;
-    if (chip->pending == 0 || !tca8418__read(chip, TCA8418_KEY_EVENT_A, &event) || (event & 0x7F) == 0) {
+    if (!tca8418__read(chip, TCA8418_KEY_EVENT_A, &event) || (event & 0x7F) == 0) {
         chip->pending = 0;
-        (void)tca8418__write(chip, TCA8418_INT_STAT, 0x01);
+        chip->checked_at -= pdMS_TO_TICKS(TCA8418_CHECK_MS); /* Looks again next call. */
         return BRUCE_ERR_NOT_FOUND;
     }
     chip->pending--;

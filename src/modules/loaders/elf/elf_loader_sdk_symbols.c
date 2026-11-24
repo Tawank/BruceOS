@@ -2062,6 +2062,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(device__coredump_get_summary),
     ESP_ELFSYM_EXPORT(device__coredump_read),
     ESP_ELFSYM_EXPORT(device__coredump_erase),
+    ESP_ELFSYM_EXPORT(device__has_keyboard_light),
+    ESP_ELFSYM_EXPORT(device__set_keyboard_light),
 
     /* Wall clock */
     ESP_ELFSYM_EXPORT(clock__get_utc),
@@ -2077,6 +2079,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Read-only application preferences. Protected values enforce config
      * permission in Core. */
     ESP_ELFSYM_EXPORT(config__get_sound_volume),
+    ESP_ELFSYM_EXPORT(config__get_keyboard_light),
+    ESP_ELFSYM_EXPORT(config__set_keyboard_light),
     ESP_ELFSYM_EXPORT(config__set_sound_volume),
     ESP_ELFSYM_EXPORT(config__get_color_primary),
     ESP_ELFSYM_EXPORT(config__get_color_secondary),

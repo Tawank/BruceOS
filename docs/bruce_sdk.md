@@ -115,6 +115,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `config__set_sound_enabled` (config.h)
 - `config__set_sound_volume` (config.h)
 - `config__set_keyboard_lang` (config.h)
+- `config__set_keyboard_light` (config.h)
 - `config__set_hotkeys` (config.h)
 - `config__set_led_enabled` (config.h)
 - `config__set_led_brightness` (config.h)
@@ -129,6 +130,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `config__remove_startup_app` (config.h)
 - `config__get_dev_mode` (config.h)
 - `config__set_dev_mode` (config.h)
+- `device__set_keyboard_light` (device.h)
 
 ### `execute`
 
@@ -6742,6 +6744,46 @@ Sets the on-screen keyboard language.
 
 ---
 
+## config__get_keyboard_light()
+
+```c
+int config__get_keyboard_light(void);
+```
+
+Keyboard backlight (0-100, 0 off). @permission config
+
+### Returns
+
+`int`
+
+
+---
+
+## config__set_keyboard_light()
+
+```c
+bruce_result_t config__set_keyboard_light(int value);
+```
+
+Saves the keyboard backlight level without changing the light; see device__set_keyboard_light().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `value` | `int` | New level (0-100). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `config`
+
+
+---
+
 ## config__get_hotkeys()
 
 ```c
@@ -7374,6 +7416,50 @@ to be released first.
 #### Permissions
 
 - `process`
+
+
+---
+
+## device__has_keyboard_light()
+
+```c
+bool device__has_keyboard_light(void);
+```
+
+Whether the board has a keyboard backlight.
+
+### Returns
+
+`bool`
+
+
+---
+
+## device__set_keyboard_light()
+
+```c
+bruce_result_t device__set_keyboard_light(int percent);
+```
+
+Sets the keyboard backlight and saves it as the setting.
+
+The light is off while the device sleeps.
+
+@return BRUCE_ERR_UNSUPPORTED on boards without one.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `percent` | `int` | 0 (off) to 100. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `config`
 
 
 ---

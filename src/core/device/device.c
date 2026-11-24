@@ -111,6 +111,7 @@ bruce_result_t device__sleep(void) {
     display__freeze(true);
     uint8_t brightness = display__get_brightness();
     (void)display__set_brightness(0);
+    device__keyboard_light_apply(false);
     gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL);
     if (ring_pin >= 0) gpio_wakeup_enable((gpio_num_t)ring_pin, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
@@ -121,6 +122,7 @@ bruce_result_t device__sleep(void) {
     gpio_wakeup_disable(pin);
     if (ring_pin >= 0) gpio_wakeup_disable((gpio_num_t)ring_pin);
     (void)display__set_brightness(brightness);
+    device__keyboard_light_apply(true);
     display__freeze(false);
     /* The press that woke the device is not input: drop it until the input
      * poller has debounced the release. */

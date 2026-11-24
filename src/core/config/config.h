@@ -65,6 +65,7 @@ typedef struct {
     bool soundEnabled;
     int soundVolume;
     const char *keyboardLang; /* "QWERTY" | "AZERTY" | "QWERTZ" */
+    int keyboardLight;        /* Keyboard backlight, 0-100; 0 off. */
     bruce_config_hotkeys_t hotkeys;
 
     int ledBrightness;

@@ -4,6 +4,7 @@
 #include "core_sdk/cellular.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
+#include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/memory.h"
@@ -451,6 +452,8 @@ static int config_app__display_gui(void) {
     static const int brightness_percents[6] = {100, 75, 50, 25, 1, 0};
     static const char *const brightness_labels[6] = {"100%", "75%", "50%", "25%", "1%", "0%"};
     size_t brightness_count = display__is_epaper() ? 6 : 5;
+    static const int light_percents[5] = {100, 75, 50, 25, 0};
+    static const char *const light_labels[5] = {"100%", "75%", "50%", "25%", "Off"};
     static const int dim_seconds[5] = {10, 20, 30, 60, 0};
     static const char *const dim_labels[5] = {"10s", "20s", "30s", "60s", "Disabled"};
     static const char *const rotation_labels[4] = {
@@ -469,9 +472,11 @@ static int config_app__display_gui(void) {
         char *dim_label = memory__malloc(32);
         char *rotation_label = memory__malloc(48);
         char *buffered_label = memory__malloc(48);
-        bruce_dialog_choice_t *choices = memory__calloc(9, sizeof(*choices));
+        char *light_label = memory__malloc(32);
+        bruce_dialog_choice_t *choices = memory__calloc(10, sizeof(*choices));
         if (brightness_label == NULL || dim_label == NULL || rotation_label == NULL ||
-            buffered_label == NULL || choices == NULL) {
+            buffered_label == NULL || light_label == NULL || choices == NULL) {
+            memory__free(light_label);
             memory__free(brightness_label);
             memory__free(dim_label);
             memory__free(rotation_label);
@@ -484,6 +489,9 @@ static int config_app__display_gui(void) {
         else snprintf(dim_label, 32, "Dim time: Disabled");
         snprintf(rotation_label, 48, "Orientation: %s", rotation_labels[rotation]);
         snprintf(buffered_label, 48, "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
+        int light = config__get_keyboard_light();
+        if (light > 0) snprintf(light_label, 32, "Keyboard light: %d%%", light);
+        else snprintf(light_label, 32, "Keyboard light: Off");
         char refresh_label[32];
         int refresh_every = config__get_display_full_refresh_every();
         if (refresh_every > 0) snprintf(refresh_label, sizeof(refresh_label), "Full refresh: %d", refresh_every);
@@ -496,6 +504,8 @@ static int config_app__display_gui(void) {
         choices[count++] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
         choices[count++] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
         choices[count++] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
+        if (device__has_keyboard_light())
+            choices[count++] = (bruce_dialog_choice_t){.label = light_label, .value = "keyboard_light"};
         choices[count++] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
         choices[count++] = (bruce_dialog_choice_t){
             .label = high_contrast ? "High contrast: ON" : "High contrast: OFF", .value = "high_contrast"};
@@ -532,6 +542,15 @@ static int config_app__display_gui(void) {
                     dialog__choice_launcher("Dim time", NULL, dim_choices, 5, &dim_selected);
                 if (dim_result == BRUCE_OK && dim_selected < 5)
                     result = config__set_display_dim_timeout(dim_seconds[dim_selected]);
+            } else if (strcmp(action, "keyboard_light") == 0) {
+                bruce_dialog_choice_t light_choices[5];
+                for (size_t i = 0; i < 5; ++i)
+                    light_choices[i] = (bruce_dialog_choice_t){.label = light_labels[i], .value = light_labels[i]};
+                size_t light_selected = config_app__closest_index(light_percents, 5, light);
+                bruce_result_t light_result =
+                    dialog__choice_launcher("Keyboard light", NULL, light_choices, 5, &light_selected);
+                if (light_result == BRUCE_OK && light_selected < 5)
+                    result = device__set_keyboard_light(light_percents[light_selected]);
             } else if (strcmp(action, "rotation") == 0) {
                 bruce_dialog_choice_t rotation_choices[4];
                 for (size_t i = 0; i < 4; ++i)
@@ -562,6 +581,7 @@ static int config_app__display_gui(void) {
         memory__free(dim_label);
         memory__free(rotation_label);
         memory__free(buffered_label);
+        memory__free(light_label);
         memory__free(choices);
         if (back) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
@@ -572,7 +592,7 @@ static int config_app__display_gui(void) {
 
 static int config_app__display_cli(
     ArgParser *display_parser, ArgParser *buffered, ArgParser *brightness, ArgParser *dim, ArgParser *rotation,
-    ArgParser *full_refresh, ArgParser *dither
+    ArgParser *full_refresh, ArgParser *dither, ArgParser *keyboard_light
 ) {
     ArgParser *action = ap_get_cmd_parser(display_parser);
     int dither_mode = config__get_display_dither();
@@ -590,6 +610,7 @@ static int config_app__display_cli(
             dim_timeout,
             config__get_display_rotation() * 90
         );
+        if (device__has_keyboard_light()) stdio__printf("Keyboard light: %d%%\n", config__get_keyboard_light());
         if (display__is_epaper()) {
             stdio__printf(
                 "Full refresh every: %d updates (0 = never)\nDithering: %s\n",
@@ -620,6 +641,17 @@ static int config_app__display_cli(
         long value = strtol(percent, &end, 10);
         if (end == percent || *end != '\0' || value < 0 || value > 100) return BRUCE_ERR_INVALID_ARGUMENT;
         return config_app__set_brightness_percent((int)value);
+    }
+    if (action == keyboard_light) {
+        const char *percent = ap_get_arg(keyboard_light, "percent");
+        if (percent == NULL) {
+            stdio__printf("Keyboard light: %d%%\n", config__get_keyboard_light());
+            return BRUCE_OK;
+        }
+        char *end = NULL;
+        long value = strtol(percent, &end, 10);
+        if (end == percent || *end != '\0' || value < 0 || value > 100) return BRUCE_ERR_INVALID_ARGUMENT;
+        return device__set_keyboard_light((int)value);
     }
     if (action == dim) {
         const char *seconds = ap_get_arg(dim, "seconds");
@@ -1069,6 +1101,7 @@ int config_app_main(int argc, char **argv) {
     ArgParser *display_rotation = display != NULL ? ap_new_cmd(display, "rotation") : NULL;
     ArgParser *display_full_refresh = display != NULL ? ap_new_cmd(display, "full-refresh") : NULL;
     ArgParser *display_dither = display != NULL ? ap_new_cmd(display, "dither") : NULL;
+    ArgParser *display_keyboard_light = display != NULL ? ap_new_cmd(display, "keyboard-light") : NULL;
     ArgParser *theme = ap_new_cmd(root, "theme");
     ArgParser *theme_list = theme != NULL ? ap_new_cmd(theme, "list") : NULL;
     ArgParser *theme_set = theme != NULL ? ap_new_cmd(theme, "set") : NULL;
@@ -1104,6 +1137,7 @@ int config_app_main(int argc, char **argv) {
         display_rotation,
         display_full_refresh,
         display_dither,
+        display_keyboard_light,
         theme,
         theme_list,
         theme_set,
@@ -1164,6 +1198,8 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(display_full_refresh, "E-paper: partial updates between full refreshes.");
     ap_add_optional_arg(display_full_refresh, "updates", "0 to 1000, 0 = never");
     ap_set_helptext(display_dither, "E-paper: how grays and colors become black and white dots.");
+    ap_set_helptext(display_keyboard_light, "Set the keyboard backlight.");
+    ap_add_optional_arg(display_keyboard_light, "percent", "0 (off) to 100");
     ap_add_optional_arg(display_dither, "mode", "threshold, bayer2, bayer4, noise, blue-noise, atkinson, or toggle (next one)");
     ap_set_helptext(theme, "Select or inspect the UI color theme.");
     ap_set_helptext(theme_list, "List available theme presets.");
@@ -1222,7 +1258,7 @@ int config_app_main(int argc, char **argv) {
         result = gui ? config_app__display_gui()
                      : config_app__display_cli(
                            display, display_buffered, display_brightness, display_dim, display_rotation,
-                           display_full_refresh, display_dither
+                           display_full_refresh, display_dither, display_keyboard_light
                        );
     } else if (theme_hierarchy) {
         ArgParser *theme_action = ap_get_cmd_parser(theme);

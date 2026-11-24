@@ -58,6 +58,20 @@ bruce_result_t device__power_off(uint32_t delay_ms);
  */
 bruce_result_t device__sleep(void);
 
+/** @brief Whether the board has a keyboard backlight. */
+bool device__has_keyboard_light(void);
+
+/**
+ * @brief Sets the keyboard backlight and saves it as the setting.
+ *
+ * The light is off while the device sleeps.
+ *
+ * @param percent 0 (off) to 100.
+ * @return BRUCE_ERR_UNSUPPORTED on boards without one.
+ * @permission config
+ */
+bruce_result_t device__set_keyboard_light(int percent);
+
 /**
  * @brief Shared board I2C sensor topics (touch, battery).
  *

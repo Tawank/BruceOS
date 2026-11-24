@@ -3,8 +3,6 @@
 #include "esp_system.h"
 #include <stdio.h>
 
-#include "sdkconfig.h"
-
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
 
@@ -272,6 +270,7 @@ void app_main(void) {
     if (event_loop__init() != BRUCE_OK) printf("Core event loop initialization failed\n");
 
     bool ui_ok = init_user_interface();
+    device__keyboard_light_apply(true);
 
     app_runner__register_defaults();
     cellular__start();

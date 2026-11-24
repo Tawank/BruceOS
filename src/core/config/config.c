@@ -210,6 +210,9 @@ static void config__validate(config__t *cfg) {
     if (cfg->soundVolume < 0) cfg->soundVolume = 0;
     if (cfg->soundVolume > 100) cfg->soundVolume = 100;
 
+    if (cfg->keyboardLight < 0) cfg->keyboardLight = 0;
+    if (cfg->keyboardLight > 100) cfg->keyboardLight = 100;
+
     if (cfg->ledBrightness < 0) cfg->ledBrightness = 0;
     if (cfg->ledBrightness > 100) cfg->ledBrightness = 100;
     if (cfg->ledBlinkEnabled > 1) cfg->ledBlinkEnabled = 1;
@@ -359,6 +362,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     }
 
     json_get_string(root, "keyboardLang", &cfg->keyboardLang);
+    json_get_int(root, "keyboardLight", &cfg->keyboardLight);
     json_get_string(root, "launcher", &cfg->launcher);
 
     const cJSON *hotkeys = cJSON_GetObjectItemCaseSensitive(root, "hotkeys");
@@ -496,6 +500,7 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddBoolToObject(sound, "enabled", cfg->soundEnabled);
     cJSON_AddNumberToObject(sound, "volume", cfg->soundVolume);
     cJSON_AddStringToObject(root, "keyboardLang", config__or_empty(cfg->keyboardLang));
+    cJSON_AddNumberToObject(root, "keyboardLight", cfg->keyboardLight);
 
     cJSON *hotkeys = cJSON_AddObjectToObject(root, "hotkeys");
     for (size_t i = 0; i < cfg->hotkeys.count; ++i) {
@@ -1054,6 +1059,7 @@ void config__get_colors_internal(
     config__unlock();
 }
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)
+CONFIG__DEFINE_INT_FIELD(keyboard_light, keyboardLight)
 
 const bruce_config_hotkeys_t *config__get_hotkeys(void) {
     if (config__guard() != BRUCE_OK || !config__init()) return NULL;

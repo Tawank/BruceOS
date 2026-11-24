@@ -109,7 +109,20 @@ the keyboard layout in `src/modules/input`. `CONFIG_BRUCE_TOUCH_HAL` and
 processes use the board's first touch and keypad devices.
 
 Both drivers pulse their `reset` pin at probe and set the chip up on the
-first read, so boot doesn't wait for the chips to start.
+first read, so boot doesn't wait for the chips to start. With an
+`interrupt` pin on the SoC, they go to the chip only after its falling
+edge (`hal_pin_irq_enable()`, `hal_pin_irq_take()`), while a finger is
+down, and once a second in case an edge was missed. Otherwise every read
+goes to the chip.
+
+## LEDs
+
+An LED-class driver sets a brightness from 0 to 255 (`hal_led_set()`).
+`pwm_led_driver` (`drivers/led/pwm_led.c`, like Linux's leds-pwm) dims
+the SoC pin named `led` with an LEDC timer and channel that board.c gives
+it. Core's `device__set_keyboard_light()` drives the device named
+`keyboard_light`, at its saved level from boot and off while the device
+sleeps.
 
 ## Using a device
 

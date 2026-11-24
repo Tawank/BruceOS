@@ -11,11 +11,15 @@
 #define CST3530_TIMEOUT_MS 50
 #define CST3530_RESET_MS 10
 #define CST3530_BOOT_MS 150
+#define CST3530_CHECK_MS 1000 /* Reads anyway this often, in case an edge was missed. */
 
 typedef struct {
     i2c_master_dev_handle_t i2c;
     TickType_t ready_at; /* Out of reset and booted. */
     bool configured;
+    const hal_pin_t *irq;
+    bool touched; /* The last report had a finger or key: read every call until it ends. */
+    TickType_t checked_at;
 } cst3530_t;
 
 /* Pulses reset; the chip is set up on the first read, once it has booted. */
@@ -34,6 +38,8 @@ static bruce_result_t cst3530__probe(const hal_device_t *device) {
         (void)hal_pin_set(reset, false);
         chip->ready_at = xTaskGetTickCount() + pdMS_TO_TICKS(CST3530_BOOT_MS);
     }
+    const hal_pin_t *irq = hal_device_pin(device, "interrupt");
+    if (hal_pin_irq_enable(irq) == BRUCE_OK) chip->irq = irq;
     device->state->data = chip;
     return BRUCE_OK;
 }
@@ -62,6 +68,14 @@ static bruce_result_t cst3530__read(const hal_device_t *device, hal_touch_report
         if ((int32_t)(xTaskGetTickCount() - chip->ready_at) < 0) return BRUCE_OK;
         cst3530__configure(chip);
     }
+    /* INT pulses low for each report (Hynitron's driver reads on its falling edge). */
+    TickType_t now = xTaskGetTickCount();
+    if (chip->irq != NULL && !chip->touched && !hal_pin_irq_take(chip->irq) &&
+        now - chip->checked_at < pdMS_TO_TICKS(CST3530_CHECK_MS)) {
+        return BRUCE_OK;
+    }
+    chip->checked_at = now;
+    chip->touched = false;
     static const uint8_t report_reg[] = {0xD0, 0x07, 0x00, 0x00};
     static const uint8_t report_ack[] = {0xD0, 0x00, 0x02, 0xAB};
     uint8_t report[4 + 5 * 5] = {0};
@@ -80,6 +94,7 @@ static bruce_result_t cst3530__read(const hal_device_t *device, hal_touch_report
     if (sum != (report[0] | report[1] << 8)) return BRUCE_OK;
 
     /* Key byte: id in the low nibble, 1 = pressed in the high nibble. */
+    chip->touched = true;
     if (keys > 0 && (report[8] >> 4) != 0) out->key = report[8] & 0x0F;
     if (fingers == 0) return BRUCE_OK;
     const uint8_t *point = &report[4 + keys * 5];

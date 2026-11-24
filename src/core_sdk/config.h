@@ -566,6 +566,17 @@ const char *config__get_keyboard_lang(void);
  */
 bruce_result_t config__set_keyboard_lang(const char *value);
 
+/** @brief Keyboard backlight (0-100, 0 off). @permission config */
+int config__get_keyboard_light(void);
+
+/**
+ * @brief Saves the keyboard backlight level without changing the light; see device__set_keyboard_light().
+ *
+ * @param value New level (0-100).
+ * @permission config
+ */
+bruce_result_t config__set_keyboard_light(int value);
+
 /** @brief Configured hotkey chords. @permission config */
 const bruce_config_hotkeys_t *config__get_hotkeys(void);
 

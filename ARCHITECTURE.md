@@ -509,6 +509,16 @@ up the chip; it is let go two seconds after the last effect (an
 `esp_timer`), which powers it off. A ringing call vibrates with an alert
 every 1.5 seconds until it is answered or ends.
 
+### Keyboard light
+
+`device__set_keyboard_light()` (config permission) sets the board's HAL
+`keyboard_light` LED (the T-Deck MAX's PWM on GPIO 42) from 0 to 100% and
+saves it as `keyboardLight` in the config. Core lights it at that level
+after the display comes up, and turns it off while `device__sleep()`
+sleeps. Settings has it under Display & UI, and the shell as
+`config display keyboard-light [percent]`. It is off by default, as in
+LilyGO's firmware.
+
 ### Cellular
 
 `core/cellular` drives a SIMCom A76xx modem (`BRUCE_CELLULAR_*` in Kconfig;
