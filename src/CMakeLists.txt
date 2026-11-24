@@ -208,6 +208,7 @@ idf_component_register(SRCS
                     "hal/hal_touch.c"
                     "hal/drivers/battery/bq27220.c"
                     "hal/drivers/gpio/xl9555.c"
+                    "hal/drivers/imu/bhi260ap.c"
                     "hal/drivers/keypad/tca8418.c"
                     "hal/drivers/touch/cst3530.c"
                     "modules/hal/hal_app.c"

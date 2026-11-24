@@ -3,6 +3,7 @@
 
 #include "hal/drivers/battery/bq27220.h"
 #include "hal/drivers/gpio/xl9555.h"
+#include "hal/drivers/imu/bhi260ap.h"
 #include "hal/drivers/keypad/tca8418.h"
 #include "hal/drivers/touch/cst3530.h"
 #include "hal/hal.h"
@@ -51,7 +52,11 @@ HAL_DEVICE(keyboard, .driver = &tca8418_driver, .bus = &i2c0, .address = 0x34, .
 
 HAL_RAIL(modem_power, .enable = HAL_PIN(xl9555, 0));
 HAL_RAIL(gps_power, .enable = HAL_PIN(xl9555, 2));
-HAL_RAIL(imu_power, .enable = HAL_PIN(xl9555, 3)); /* BHI260AP's 1.8 V, for when it has a driver. */
+HAL_RAIL(imu_power, .enable = HAL_PIN(xl9555, 3)); /* BHI260AP's 1.8 V. */
+
+/* No reset line; HIRQ on GPIO 21 for when it runs firmware. */
+HAL_DEVICE(imu, .driver = &bhi260ap_driver, .bus = &i2c0, .address = 0x28,
+           HAL_PINS({"interrupt", HAL_SOC_PIN(21)}), HAL_RAILS(&imu_power));
 
 /* No drivers yet: core/gps and core/cellular drive them through these. */
 HAL_DEVICE(gps, HAL_RAILS(&gps_power));
@@ -60,4 +65,4 @@ HAL_DEVICE(modem,
                     {"audio-select", HAL_PIN(xl9555, 10)}), /* High: speaker and mic to the modem. */
            HAL_RAILS(&modem_power));
 
-HAL_BOARD("LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);
+HAL_BOARD("LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &imu, &gps, &modem);

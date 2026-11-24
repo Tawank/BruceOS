@@ -53,6 +53,18 @@ header pointing back to this document.
   `src/modules/rf/protocols/rf_decoder.{h,cpp}`,
   `src/modules/rf/protocols/rf_encoder.{h,cpp}`.
 
+## Sensor firmware
+
+### Bosch BHI260AP firmware — BSD-3-Clause
+- Upstream: <https://github.com/boschsensortec/BHI2xy_SensorAPI>
+  (`firmware/bhi260ap/BHI260AP.fw`, unmodified)
+- License: BSD 3-Clause; copyright (c) 2022 Bosch Sensortec GmbH. The
+  license text ships next to it.
+- Used by: the BHI260AP driver (`src/hal/drivers/imu/bhi260ap.c`), which
+  uploads it into the sensor's RAM. Register and command definitions in that
+  driver follow Bosch's BHY2 sensor API from the same repository.
+  Files: `sd_files/lib/firmware/bhi260ap.fw`, `sd_files/lib/firmware/bhi260ap.LICENSE`.
+
 ## NFC / RFID (ST25R3916)
 
 The ST25R3916 NFC front-end driver (`src/modules/rfid/ST25R3916.{h,cpp}`) is a

@@ -74,6 +74,12 @@ typedef struct {
     bruce_result_t (*probe)(const hal_device_t *device);
     bruce_result_t (*suspend)(const hal_device_t *device);
     bruce_result_t (*resume)(const hal_device_t *device);
+    /* Optional: brought up for its first user and let go after its last
+     * (hal_device_get()/put(), Linux's runtime PM). */
+    bruce_result_t (*start)(const hal_device_t *device);
+    void (*stop)(const hal_device_t *device);
+    /* Optional: what a ready device found or is doing, one line for `hal`. */
+    void (*describe)(const hal_device_t *device, char *out, size_t size);
     const void *api;
 } hal_driver_t;
 
@@ -82,7 +88,7 @@ typedef struct {
     hal_state_t state;
     bruce_result_t error; /* Why it failed or is absent. */
     bool powered;         /* hal_device_power() holds its rails. */
-    int16_t users;        /* Rails: devices holding it on. */
+    int16_t users;        /* Rails: devices holding it on; others: hal_device_get() users. */
     void *data;           /* The driver's own. */
 } hal_device_state_t;
 
@@ -142,6 +148,11 @@ bool hal_device_ready(const hal_device_t *device);
 const hal_pin_t *hal_device_pin(const hal_device_t *device, const char *role);
 /* Holds or lets go of the device's rails. No-op for a NULL device or one without rails. */
 bruce_result_t hal_device_power(const hal_device_t *device, bool on);
+
+/* A user of a ready device: the first starts it (driver `start`), the last
+ * put stops it. Not for rails, which hal_device_power() counts. */
+bruce_result_t hal_device_get(const hal_device_t *device);
+void hal_device_put(const hal_device_t *device);
 
 /* Suspends every ready device, children first, and resumes them in the opposite order. */
 void hal__suspend(void);

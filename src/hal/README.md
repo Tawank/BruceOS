@@ -44,7 +44,9 @@ order. A probe returning `BRUCE_ERR_NOT_FOUND` on a device marked
 to be tried again on the next pass. `hal__suspend()`/`hal__resume()` walk
 the ready devices in reverse and forward probe order.
 
-The `hal` shell command lists every device with its driver, bus and state.
+The `hal` shell command lists every device with its driver, bus and state,
+plus a line from the driver's optional `describe` (e.g. what a chip
+reported at probe).
 
 ## A board
 
@@ -115,6 +117,13 @@ hal_pin_set(hal_device_pin(modem, "pwrkey"), true);      /* wherever that pin is
 
 Each call accepts NULL and does nothing, so code works on boards without
 the device.
+
+A driver with `start`/`stop` is brought up on demand: `hal_device_get()`
+takes a user (the first runs `start`), `hal_device_put()` drops one (the
+last runs `stop`), after Linux's runtime PM. `hal start|stop <device>` does
+the same from the shell. The BHI260AP uses it to upload its firmware from
+`/lib/firmware/bhi260ap.fw` (or the SD card's `/lib/firmware`; the file is
+in `sd_files/lib/firmware`) only when something needs the sensor.
 
 ## A driver
 

@@ -454,7 +454,9 @@ its BQ27220 battery gauge (`BRUCE_BATTERY_BACKEND_HAL`), CST3530 touch
 `board_i2c__pins()` and `board_i2c__speed_hz()` answer from the HAL's I2C
 bus, so its pins live only in `board.c`; `BRUCE_SD_HAL` and `BRUCE_DISPLAY_HAL`
 do the same for the SD card and the e-paper (`sd` and `display` on `spi2`),
-and a hog (`spi2_quiet`) keeps the bus's chip selects off from boot; the rest is still configured from Kconfig and
+and a hog (`spi2_quiet`) keeps the bus's chip selects off from boot; the BHI260AP
+(`imu`) loads Bosch's firmware from `/lib/firmware` on its first
+`hal_device_get()`; the rest is still configured from Kconfig and
 moves one device class at a time. `src/hal/README.md` has the details; the
 `hal` command lists the devices and their state.
 

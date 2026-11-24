@@ -142,6 +142,26 @@ bruce_result_t hal_device_power(const hal_device_t *device, bool on) {
     return result;
 }
 
+bruce_result_t hal_device_get(const hal_device_t *device) {
+    if (!hal_device_ready(device)) return BRUCE_ERR_NOT_FOUND;
+    if (device->driver == &hal_rail_driver) return BRUCE_ERR_INVALID_ARGUMENT;
+    hal__lock();
+    bruce_result_t result = BRUCE_OK;
+    if (device->state->users == 0 && device->driver->start != NULL) result = device->driver->start(device);
+    if (result == BRUCE_OK) device->state->users++;
+    hal__unlock();
+    return result;
+}
+
+void hal_device_put(const hal_device_t *device) {
+    if (device == NULL || device->driver == NULL || device->driver == &hal_rail_driver) return;
+    hal__lock();
+    if (device->state->users > 0 && --device->state->users == 0 && device->driver->stop != NULL) {
+        device->driver->stop(device);
+    }
+    hal__unlock();
+}
+
 static void hal__change(bool suspend) {
     if (s_lock == NULL) return;
     hal__lock();
