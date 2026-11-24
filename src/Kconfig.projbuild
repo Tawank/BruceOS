@@ -59,6 +59,14 @@ menu "Bruce hardware configuration"
             very early in app_main(), before storage/display init. -1 if
             the board doesn't need this.
 
+    config BRUCE_BOARD_ID
+        string "Board id (boards/<id>)"
+        default ""
+        help
+            Picks boards/<id>/board.c, the board's HAL devices, in any
+            build directory (build-board/<id> also sets it from its name).
+            Empty: no HAL devices (src/hal/board_none.c).
+
     menu "Board I2C bus"
         config BRUCE_BOARD_I2C_ENABLED
             bool "Shared I2C bus for PMIC/touch/GPIO-expander available"
@@ -72,21 +80,31 @@ menu "Bruce hardware configuration"
                 directly by these drivers, the same way the display driver
                 owns its own SPI bus.
 
+        config BRUCE_BOARD_I2C_HAL
+            bool "Bus from the board file (board.c)"
+            depends on BRUCE_BOARD_I2C_ENABLED
+            default n
+            select BRUCE_KEYBOARD_TCA8418_HAL if BRUCE_KEYBOARD_TCA8418_ENABLED
+            help
+                The first I2C bus in boards/<id>/board.c, with its pins and
+                clock, instead of the three options below. A TCA8418
+                keyboard then comes from board.c too.
+
         config BRUCE_BOARD_I2C_SDA_GPIO
             int "Board I2C SDA GPIO"
-            depends on BRUCE_BOARD_I2C_ENABLED
+            depends on BRUCE_BOARD_I2C_ENABLED && !BRUCE_BOARD_I2C_HAL
             default 21
             range 0 48
 
         config BRUCE_BOARD_I2C_SCL_GPIO
             int "Board I2C SCL GPIO"
-            depends on BRUCE_BOARD_I2C_ENABLED
+            depends on BRUCE_BOARD_I2C_ENABLED && !BRUCE_BOARD_I2C_HAL
             default 22
             range 0 48
 
         config BRUCE_BOARD_I2C_FREQ_HZ
             int "Board I2C clock (Hz)"
-            depends on BRUCE_BOARD_I2C_ENABLED
+            depends on BRUCE_BOARD_I2C_ENABLED && !BRUCE_BOARD_I2C_HAL
             default 400000
             range 100000 1000000
 

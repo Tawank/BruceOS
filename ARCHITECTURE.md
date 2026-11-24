@@ -450,7 +450,9 @@ T-Deck MAX's buses (I2C, and the SPI host the SD card and e-paper share),
 its XL9555 and what that powers (GPS, modem power, PWRKEY, audio routing)
 its BQ27220 battery gauge (`BRUCE_BATTERY_BACKEND_HAL`), CST3530 touch
 (`BRUCE_TOUCH_HAL`) and TCA8418 keyboard controller
-(`BRUCE_KEYBOARD_TCA8418_HAL`) have moved so far; `board_i2c__acquire()` returns the HAL's I2C bus there; the rest is still configured from Kconfig and
+(`BRUCE_KEYBOARD_TCA8418_HAL`) have moved so far. There `BRUCE_BOARD_I2C_HAL` makes `board_i2c__acquire()`,
+`board_i2c__pins()` and `board_i2c__speed_hz()` answer from the HAL's I2C
+bus, so its pins live only in `board.c`; the rest is still configured from Kconfig and
 moves one device class at a time. `src/hal/README.md` has the details; the
 `hal` command lists the devices and their state.
 

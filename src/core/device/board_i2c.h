@@ -9,10 +9,17 @@
  * I2C API: the bus here is owned directly by these drivers, the same way
  * display_driver.c owns its own SPI bus.
  *
- * On a board whose board.c declares an I2C bus, this is that HAL bus.
+ * With BRUCE_BOARD_I2C_HAL it is the first I2C bus in board.c instead.
  *
  * Returns NULL if BRUCE_BOARD_I2C_ENABLED is not set, or if bus creation
  * failed. Safe to call from multiple drivers/tasks; the bus is created once
  * and the handle is cached for the life of the process.
  */
 i2c_master_bus_handle_t board_i2c__acquire(void);
+
+/* The bus's pins, for code that opens it by pins (core/i2c.c's app API).
+ * False when there is no board bus. */
+bool board_i2c__pins(int *sda, int *scl);
+
+/* The clock for devices on the bus. */
+uint32_t board_i2c__speed_hz(void);

@@ -18,6 +18,7 @@ typedef struct {
     int8_t sda;
     int8_t scl;
     bool pullup; /* The ESP's internal pull-ups, for boards without their own. */
+    uint32_t speed_hz; /* For code outside the HAL that adds chips to it (board_i2c__speed_hz()). */
 } hal_i2c_master_config_t;
 
 extern const hal_driver_t hal_i2c_master_driver;

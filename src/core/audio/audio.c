@@ -142,7 +142,7 @@ static bruce_result_t audio__es8311_enable(void) {
     i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = 0x18,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .scl_speed_hz = board_i2c__speed_hz(),
     };
     i2c_master_dev_handle_t dev = NULL;
     if (bus == NULL || i2c_master_bus_add_device(bus, &device_config, &dev) != ESP_OK) {

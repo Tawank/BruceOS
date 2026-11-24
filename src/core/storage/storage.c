@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include "driver/sdspi_host.h"
+#include "esp_private/spi_common_internal.h"
 #include "esp_err.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
@@ -522,7 +523,9 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
         .quadhd_io_num = -1,
         .max_transfer_sz = 4096,
     };
-    esp_err_t err = spi_bus_initialize(config->host, &bus, SPI_DMA_CH_AUTO);
+    /* The display or the board's HAL bus may already own the host. */
+    esp_err_t err = spi_bus_get_attr(config->host) != NULL ? ESP_ERR_INVALID_STATE
+                                                            : spi_bus_initialize(config->host, &bus, SPI_DMA_CH_AUTO);
     s_sd_bus_owned = err == ESP_OK;
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "could not initialize SD SPI bus: %s", esp_err_to_name(err));

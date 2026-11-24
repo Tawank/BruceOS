@@ -4,7 +4,7 @@
 #include "freertos/semphr.h"
 #include "hal/hal_i2c.h"
 
-#if CONFIG_BRUCE_BOARD_I2C_ENABLED
+#if CONFIG_BRUCE_BOARD_I2C_ENABLED && !CONFIG_BRUCE_BOARD_I2C_HAL
 
 static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
@@ -24,9 +24,6 @@ static void board_i2c__lock(void) {
 static void board_i2c__unlock(void) { xSemaphoreGive(s_mutex); }
 
 i2c_master_bus_handle_t board_i2c__acquire(void) {
-    /* A board that describes its bus in board.c owns it through the HAL. */
-    i2c_master_bus_handle_t hal_bus = hal_i2c_bus(hal_device_first(HAL_CLASS_I2C));
-    if (hal_bus != NULL) return hal_bus;
     board_i2c__lock();
     if (!s_init_attempted) {
         s_init_attempted = true;
@@ -45,8 +42,35 @@ i2c_master_bus_handle_t board_i2c__acquire(void) {
     return bus;
 }
 
+bool board_i2c__pins(int *sda, int *scl) {
+    *sda = CONFIG_BRUCE_BOARD_I2C_SDA_GPIO;
+    *scl = CONFIG_BRUCE_BOARD_I2C_SCL_GPIO;
+    return true;
+}
+
+uint32_t board_i2c__speed_hz(void) { return CONFIG_BRUCE_BOARD_I2C_FREQ_HZ; }
+
 #else
 
+/* The first I2C bus in board.c, if any. */
+static const hal_i2c_master_config_t *board_i2c__hal_config(void) {
+    const hal_device_t *bus = hal_device_first(HAL_CLASS_I2C);
+    return hal_i2c_bus(bus) != NULL ? bus->config : NULL;
+}
+
 i2c_master_bus_handle_t board_i2c__acquire(void) { return hal_i2c_bus(hal_device_first(HAL_CLASS_I2C)); }
+
+bool board_i2c__pins(int *sda, int *scl) {
+    const hal_i2c_master_config_t *config = board_i2c__hal_config();
+    if (config == NULL) return false;
+    *sda = config->sda;
+    *scl = config->scl;
+    return true;
+}
+
+uint32_t board_i2c__speed_hz(void) {
+    const hal_i2c_master_config_t *config = board_i2c__hal_config();
+    return config != NULL ? config->speed_hz : 100000;
+}
 
 #endif

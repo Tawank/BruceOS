@@ -11,7 +11,7 @@
 #include "hal/hal_spi.h"
 
 /* Keyboard, touch, XL9555, ES8311, BQ27220. */
-static const hal_i2c_master_config_t i2c0_config = {.port = 0, .sda = 13, .scl = 14, .pullup = true};
+static const hal_i2c_master_config_t i2c0_config = {.port = 0, .sda = 13, .scl = 14, .pullup = true, .speed_hz = 400000};
 HAL_DEVICE(i2c0, .driver = &hal_i2c_master_driver, .config = &i2c0_config);
 
 /* SD card (CS 48), e-paper (CS 34) and LoRa (CS 3); their drivers add
@@ -19,9 +19,9 @@ HAL_DEVICE(i2c0, .driver = &hal_i2c_master_driver, .config = &i2c0_config);
 static const hal_spi_master_config_t spi2_config = {.host = SPI2_HOST, .sck = 36, .mosi = 33, .miso = 47, .max_transfer = 4096};
 HAL_DEVICE(spi2, .driver = &hal_spi_master_driver, .config = &spi2_config);
 
-/* Outputs at boot: 4 internal LoRa antenna, 6 speaker amplifier on. The
- * rest stay low: touch (7) and keyboard (9) in reset until their drivers. */
-static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6)};
+/* Outputs at boot: 4 internal LoRa antenna, 6 speaker amplifier on,
+ * 7 touch and 9 keyboard out of reset, whichever code then drives them. */
+static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6) | (1u << 7) | (1u << 9)};
 HAL_DEVICE(xl9555, .driver = &xl9555_driver, .bus = &i2c0, .address = 0x20, .config = &xl9555_config);
 
 HAL_DEVICE(battery, .driver = &bq27220_driver, .bus = &i2c0, .address = 0x55);

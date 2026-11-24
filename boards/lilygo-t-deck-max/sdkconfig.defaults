@@ -6,6 +6,8 @@
 # routing) are HAL devices in board.c. LoRa (SX1262), gyroscope and
 # vibration motor have no driver yet; their power enables are left off.
 CONFIG_IDF_TARGET="esp32s3"
+# HAL devices from boards/lilygo-t-deck-max/board.c, whatever the build dir.
+CONFIG_BRUCE_BOARD_ID="lilygo-t-deck-max"
 
 # ---- Chip, flash and memory ----
 
@@ -25,12 +27,9 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # ---- Board buses and power ----
 
-# Board I2C: keyboard, touch, XL9555, ES8311, BQ27220. board.c's i2c0 owns
-# the bus; these stay for the code that still reads the pins from here.
+# Board I2C: keyboard, touch, XL9555, ES8311, BQ27220; board.c's i2c0.
 CONFIG_BRUCE_BOARD_I2C_ENABLED=y
-CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=13
-CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=14
-CONFIG_BRUCE_BOARD_I2C_FREQ_HZ=400000
+CONFIG_BRUCE_BOARD_I2C_HAL=y
 
 
 # Keep LoRa (CS 3, reset 4), SD (CS 48) and e-paper (CS 34) deselected on

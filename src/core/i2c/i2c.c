@@ -152,13 +152,13 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
             .glitch_ignore_cnt = 7,
             .flags.enable_internal_pullup = config->enable_internal_pullups,
         };
-#if CONFIG_BRUCE_BOARD_I2C_ENABLED
         /* Two controllers can't drive the same pins: share the board bus. */
-        if (config->sda == CONFIG_BRUCE_BOARD_I2C_SDA_GPIO && config->scl == CONFIG_BRUCE_BOARD_I2C_SCL_GPIO) {
+        int board_sda = -1;
+        int board_scl = -1;
+        if (board_i2c__pins(&board_sda, &board_scl) && config->sda == board_sda && config->scl == board_scl) {
             bus->handle = board_i2c__acquire();
             bus->borrowed = bus->handle != NULL;
         }
-#endif
         esp_err_t error = bus->borrowed ? ESP_OK : i2c_new_master_bus(&bus_config, &bus->handle);
         bruce_result_t result = error == ESP_ERR_NOT_FOUND ? BRUCE_ERR_BUSY : i2c__esp_result(error);
         if (result != BRUCE_OK) {

@@ -110,7 +110,7 @@ static bool device_bus__touch_ensure_device(i2c_master_bus_handle_t bus) {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = CONFIG_BRUCE_TOUCH_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .scl_speed_hz = board_i2c__speed_hz(),
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_touch_dev) != ESP_OK) return false;
 #if CONFIG_BRUCE_TOUCH_CST3530
@@ -252,7 +252,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = CONFIG_BRUCE_BATTERY_AXP2101_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .scl_speed_hz = board_i2c__speed_hz(),
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_battery_dev) != ESP_OK) return false;
 
@@ -298,7 +298,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = CONFIG_BRUCE_BATTERY_AXP192_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .scl_speed_hz = board_i2c__speed_hz(),
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_battery_dev) != ESP_OK) return false;
 
@@ -345,7 +345,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = CONFIG_BRUCE_BATTERY_BQ27220_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .scl_speed_hz = board_i2c__speed_hz(),
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_battery_dev) != ESP_OK) return false;
     s_battery_ready = true;

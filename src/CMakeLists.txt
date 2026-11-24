@@ -358,7 +358,10 @@ idf_component_register(SRCS
                       ".")
 
 # The board's HAL devices (src/hal/hal.h): boards/<id>/board.c, or none.
-idf_build_get_property(bruce_board_id BRUCE_BOARD_ID)
+set(bruce_board_id "${CONFIG_BRUCE_BOARD_ID}")
+if(NOT bruce_board_id)
+    idf_build_get_property(bruce_board_id BRUCE_BOARD_ID)
+endif()
 set(bruce_board_file "${CMAKE_CURRENT_LIST_DIR}/../boards/${bruce_board_id}/board.c")
 if(bruce_board_id AND EXISTS "${bruce_board_file}")
     target_sources(${COMPONENT_LIB} PRIVATE "${bruce_board_file}")

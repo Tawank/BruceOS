@@ -47,6 +47,9 @@ The `hal` shell command lists every device with its driver, bus and state.
 
 `boards/<id>/board.c` is built into the firmware when it exists, else
 `board_none.c` (no devices: lookups find nothing, power calls do nothing).
+The id is `CONFIG_BRUCE_BOARD_ID`, which a board with a `board.c` sets in
+its `sdkconfig.defaults`, so any build directory gets it (`build/` after
+`tools/board.py --set-default`, as well as `build-board/<id>`).
 
 ```c
 static const hal_i2c_master_config_t i2c0_config = {.port = 0, .sda = 13, .scl = 14, .pullup = true};
@@ -68,7 +71,9 @@ another rail, changes only the board file.
 ESP32's controllers from the board's pins. A chip's driver gets its handle
 with `hal_i2c_open()` or `hal_spi_open()` and never names a port, host or
 bus pin. Code in `src/core` that still sets up its own chips uses the same
-buses: `board_i2c__acquire()` returns the board's HAL I2C bus, and the SD
+buses: with `CONFIG_BRUCE_BOARD_I2C_HAL`, `board_i2c__acquire()`,
+`board_i2c__pins()` and `board_i2c__speed_hz()` give the first HAL I2C bus
+and its `hal_i2c_master_config_t` instead of the Kconfig pins, and the SD
 card and display drivers find the SPI host already set up and only add
 their chip to it.
 
