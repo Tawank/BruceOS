@@ -499,6 +499,16 @@ and reads its FIFO at 25 Hz; 5 seconds without a call it puts the device
 back, which turns the sensor off but leaves the firmware loaded. Maps turns
 its 3D view with it.
 
+### Vibration
+
+`haptic__play()` (no permission) starts a click, double click, buzz or
+3/4-second alert on the board's HAL haptic device (the T-Deck MAX's DRV2605
+with an ERM motor, powered through XL9555 pin 5) and returns at once. The
+first effect takes the device with `hal_device_get()`, which powers and sets
+up the chip; it is let go two seconds after the last effect (an
+`esp_timer`), which powers it off. A ringing call vibrates with an alert
+every 1.5 seconds until it is answered or ends.
+
 ### Cellular
 
 `core/cellular` drives a SIMCom A76xx modem (`BRUCE_CELLULAR_*` in Kconfig;

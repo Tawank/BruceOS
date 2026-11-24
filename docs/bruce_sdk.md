@@ -29,6 +29,7 @@
 | [`format.h`](#formath) | Formatting helpers. |
 | [`gpio.h`](#gpioh) | GPIO pin access. |
 | [`gps.h`](#gpsh) | Built-in GPS receiver. |
+| [`haptic.h`](#haptich) | Vibration motor. |
 | [`hash.h`](#hashh) | Cryptographic and checksum digests. |
 | [`html.h`](#htmlh) | HTML parser. |
 | [`http.h`](#httph) | HTTP client. |
@@ -11310,6 +11311,72 @@ The receiver powers off after 30 seconds without a call.
 #### Permissions
 
 - `gps`
+
+
+---
+
+# `haptic.h`
+
+**Vibration motor.**
+
+Plays short effects on the board's vibration motor, if it has one. The
+motor is powered for an effect and turned off again shortly after the
+last one, so apps just play effects when they want them.
+
+---
+
+## bruce_haptic_effect_t()
+
+```c
+typedef enum {
+    BRUCE_HAPTIC_CLICK = 0,
+    BRUCE_HAPTIC_DOUBLE_CLICK,
+    BRUCE_HAPTIC_BUZZ,
+    BRUCE_HAPTIC_ALERT, /**< About 3/4 s, for something that wants attention (a ringing call). */
+} bruce_haptic_effect_t;
+```
+
+
+---
+
+## haptic__is_available()
+
+```c
+bool haptic__is_available(void);
+```
+
+Returns whether the board has a vibration motor.
+
+### Returns
+
+`bool`
+
+
+---
+
+## haptic__play()
+
+```c
+bruce_result_t haptic__play(bruce_haptic_effect_t effect);
+```
+
+Starts an effect and returns at once; a new effect replaces one still playing.
+
+@return BRUCE_ERR_UNSUPPORTED without a motor.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `effect` | `bruce_haptic_effect_t` | What to play. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+_Not permission-gated._
 
 
 ---

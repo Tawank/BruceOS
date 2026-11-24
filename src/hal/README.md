@@ -21,6 +21,7 @@ device class at a time.
 - **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`),
   `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_TOUCH` (`hal_touch.h`),
   `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_IMU` (`hal_imu.h`),
+  `HAL_CLASS_HAPTIC` (`hal_haptic.h`),
   `HAL_CLASS_GPIO` (`hal_gpio.h`),
   `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the drivers that need
   them (display, audio codec...).

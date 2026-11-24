@@ -27,6 +27,7 @@
 #include "core_sdk/filetype.h"     // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
 #include "core_sdk/gps.h"          // IWYU pragma: export
+#include "core_sdk/haptic.h"       // IWYU pragma: export
 #include "core_sdk/motion.h"       // IWYU pragma: export
 #include "core_sdk/hash.h"         // IWYU pragma: export
 #include "core_sdk/http.h"         // IWYU pragma: export

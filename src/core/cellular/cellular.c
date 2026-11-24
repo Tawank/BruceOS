@@ -14,6 +14,7 @@
 #include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/clock.h"
+#include "core_sdk/haptic.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/status_icon.h"
@@ -540,6 +541,7 @@ size_t cellular__sms_ucs2(const char *text, size_t max_chars, char *out, size_t 
 #define CELLULAR__LINE_MAX 400
 #define CELLULAR__POLL_IDLE_MS 20000
 #define CELLULAR__POLL_CALL_MS 1000
+#define CELLULAR__VIBRATE_MS 1500 /* Ringing: a 3/4 s alert this often. */
 #define CELLULAR__PHONE_COMMAND "GUI=1 phone incoming"
 
 typedef enum {
@@ -916,6 +918,22 @@ static void cellular__incoming(void) {
     notification__push(text, BRUCE_NOTIFICATION_DURATION_MAX_MS);
     /* The phone app is single-instance: a running one comes to the front. */
     (void)app_runner__run_command(CELLULAR__PHONE_COMMAND, BRUCE_LAUNCH_FOREGROUND);
+}
+
+/* A ringing call vibrates: an alert every CELLULAR__VIBRATE_MS until it is answered or ends. */
+static void cellular__vibrate(void) {
+    static uint64_t s_vibrated_at;
+    cellular__lock();
+    bool ringing = s_model.call == BRUCE_CALL_INCOMING;
+    cellular__unlock();
+    uint64_t now = cellular__now();
+    if (!ringing) {
+        s_vibrated_at = 0;
+        return;
+    }
+    if (s_vibrated_at != 0 && now - s_vibrated_at < CELLULAR__VIBRATE_MS) return;
+    s_vibrated_at = now;
+    (void)haptic__play(BRUCE_HAPTIC_ALERT);
 }
 
 static bool cellular__in_call(void) {
@@ -1446,6 +1464,7 @@ static void cellular__session(void) {
         if (xQueueReceive(s_requests, &request, 0) == pdTRUE) cellular__run_request(request);
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
+        cellular__vibrate();
         cellular__sms_arrived();
         cellular__resync();
         cellular__update_status_icon();
