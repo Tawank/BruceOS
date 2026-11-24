@@ -456,7 +456,9 @@ bus, so its pins live only in `board.c`; `BRUCE_SD_HAL` and `BRUCE_DISPLAY_HAL`
 do the same for the SD card and the e-paper (`sd` and `display` on `spi2`),
 and a hog (`spi2_quiet`) keeps the bus's chip selects off from boot; the BHI260AP
 (`imu`) loads Bosch's firmware from `/lib/firmware` on its first
-`hal_device_get()`; the rest is still configured from Kconfig and
+`hal_device_get()`. The XL9555 keeps its outputs through an ESP restart
+(it is still set up), and the modem and IMU rails (`.keep`) stay on with it,
+so the modem stays registered and the IMU keeps its firmware; the rest is still configured from Kconfig and
 moves one device class at a time. `src/hal/README.md` has the details; the
 `hal` command lists the devices and their state.
 
@@ -483,6 +485,19 @@ data Core alternates between the configured baud rate and 9600/38400. On
 boards without GPS `gps__is_available()` is false and `gps__read()` returns
 `BRUCE_ERR_UNSUPPORTED`. The built-in `gps` command prints the position
 every second.
+
+### Motion
+
+`motion__read()` (permission `gps`) returns which way the device has
+turned: yaw about the vertical, counterclockwise, from the board's HAL IMU
+(`HAL_CLASS_IMU`; the T-Deck MAX's BHI260AP running Bosch's game rotation
+vector, accel and gyro without a magnetometer). Yaw is relative and drifts
+slowly, so apps use its changes. The first call starts a Core task that
+takes the IMU with `hal_device_get()` (on the BHI260AP the first time after
+boot uploads its firmware, a few seconds, during which `ready` is false)
+and reads its FIFO at 25 Hz; 5 seconds without a call it puts the device
+back, which turns the sensor off but leaves the firmware loaded. Maps turns
+its 3D view with it.
 
 ### Cellular
 

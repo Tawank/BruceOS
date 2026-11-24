@@ -55,6 +55,7 @@
 #include "core_sdk/appdata.h"
 #include "core_sdk/cellular.h"
 #include "core_sdk/gps.h"
+#include "core_sdk/motion.h"
 #include "core_sdk/hash.h"
 #include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
@@ -2414,6 +2415,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(cellular__send_message),
     ESP_ELFSYM_EXPORT(gps__is_available),
     ESP_ELFSYM_EXPORT(gps__read),
+    ESP_ELFSYM_EXPORT(motion__is_available),
+    ESP_ELFSYM_EXPORT(motion__read),
 
     /* GPIO and serial buses */
     ESP_ELFSYM_EXPORT(gpio__configure),

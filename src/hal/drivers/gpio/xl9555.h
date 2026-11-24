@@ -5,7 +5,9 @@
 /* XINLUDA XL9555, 16 GPIOs on I2C; also sold as TCA9555/PCA9555, same registers. */
 typedef struct {
     /* Every pin becomes an output: low for 20 ms at probe (pulsing active-low
-     * resets), then these levels. Bit n is pin n, pins 10-17 are bits 8-15. */
+     * resets), then these levels. Bit n is pin n, pins 10-17 are bits 8-15.
+     * After an ESP restart, with the chip still set up, its outputs stay as
+     * they were instead. */
     uint16_t levels;
 } xl9555_config_t;
 

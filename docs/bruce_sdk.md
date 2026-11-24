@@ -43,6 +43,7 @@
 | [`lvgl.h`](#lvglh) | LVGL for apps. |
 | [`manifest.h`](#manifesth) | App manifest parsing. |
 | [`memory.h`](#memoryh) | Memory allocation (RAM, PSRAM, swap). |
+| [`motion.h`](#motionh) | Motion sensor: which way the device turns. |
 | [`net.h`](#neth) | IPv4 address text parsing and formatting. |
 | [`notification.h`](#notificationh) | On-screen notifications. |
 | [`nrf24.h`](#nrf24h) | nRF24 radio control and scanning. |
@@ -153,6 +154,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 ### `gps`
 
 - `gps__read` (gps.h)
+- `motion__read` (motion.h)
 
 ### `http`
 
@@ -15422,6 +15424,76 @@ pattern. The zero token (or one already adopted) is a no-op.
 ### Returns
 
 `bruce_result_t`
+
+
+---
+
+# `motion.h`
+
+**Motion sensor: which way the device turns.**
+
+The board's IMU is started by the first motion__read() and turned off
+again once nobody has read it for a while, so apps simply poll
+motion__read() while they want orientation.
+
+---
+
+## bruce_motion_t()
+
+```c
+typedef struct {
+    bool ready;    /**< The sensor runs and yaw_deg is current. */
+    float yaw_deg; /**< Turn about the vertical, counterclockwise seen from above, -180..180. */
+} bruce_motion_t;
+```
+
+Orientation from the motion sensor.
+
+
+---
+
+## motion__is_available()
+
+```c
+bool motion__is_available(void);
+```
+
+Returns whether the board has a motion sensor. Not permission-gated.
+
+### Returns
+
+`bool`
+
+
+---
+
+## motion__read()
+
+```c
+bruce_result_t motion__read(bruce_motion_t *out);
+```
+
+Reads the latest orientation, starting the sensor if needed.
+
+yaw_deg is relative: it starts anywhere and drifts slowly, since there is
+no magnetometer to find north, so use changes in it, not its value. Returns
+BRUCE_OK with ready false while the sensor starts; the first start after
+boot loads its firmware and takes a few seconds. The sensor turns off
+5 seconds after the last call.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out` | `bruce_motion_t *` | Receives the latest orientation. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `gps`
 
 
 ---

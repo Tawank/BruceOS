@@ -34,6 +34,14 @@ arrow icon while Prev/Next pan. The menu also has *Search*, *Directions*,
 (while a pin is shown), *Online tiles* on/off, *Exit* and *Back*. On touch
 screens the +/- buttons appear after the first touch.
 
+## 3D view
+
+*3D view* in the menu tilts the map into a perspective looking ahead. The
+arrows (or Q and E) turn it, and on a board with a motion sensor (the
+T-Deck MAX) turning the device turns the view too, without GPS; it may take
+a few seconds the first time while the sensor starts. Moving with a GPS fix
+turns it to the way of travel.
+
 ## My location
 
 On boards with a GPS receiver (`gps__is_available()`, e.g. the LilyGO T-Deck

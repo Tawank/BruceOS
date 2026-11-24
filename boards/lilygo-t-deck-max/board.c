@@ -50,9 +50,10 @@ static const tca8418_config_t keyboard_config = {.rows = 0x0F, .cols = 0x03FF};
 HAL_DEVICE(keyboard, .driver = &tca8418_driver, .bus = &i2c0, .address = 0x34, .config = &keyboard_config,
            HAL_PINS({"reset", HAL_PIN_LOW(xl9555, 9)}));
 
-HAL_RAIL(modem_power, .enable = HAL_PIN(xl9555, 0));
+/* Kept through an ESP restart: the modem stays registered, the IMU keeps its firmware. */
+HAL_RAIL(modem_power, .enable = HAL_PIN(xl9555, 0), .keep = true);
 HAL_RAIL(gps_power, .enable = HAL_PIN(xl9555, 2));
-HAL_RAIL(imu_power, .enable = HAL_PIN(xl9555, 3)); /* BHI260AP's 1.8 V. */
+HAL_RAIL(imu_power, .enable = HAL_PIN(xl9555, 3), .keep = true); /* BHI260AP's 1.8 V. */
 
 /* No reset line; HIRQ on GPIO 21 for when it runs firmware. */
 HAL_DEVICE(imu, .driver = &bhi260ap_driver, .bus = &i2c0, .address = 0x28,

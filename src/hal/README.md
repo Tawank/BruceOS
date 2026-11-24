@@ -20,7 +20,8 @@ device class at a time.
   board: everything it needs comes from its device.
 - **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`),
   `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_TOUCH` (`hal_touch.h`),
-  `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_GPIO` (`hal_gpio.h`),
+  `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_IMU` (`hal_imu.h`),
+  `HAL_CLASS_GPIO` (`hal_gpio.h`),
   `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the drivers that need
   them (display, audio codec...).
 - **Pins** (`hal_pin_t`): a controller and a pin number. The controller is
@@ -28,7 +29,9 @@ device class at a time.
   works exactly like an ESP pin. Levels are logical; `HAL_PIN_ACTIVE_LOW`
   flips them.
 - **Rails**: a supply switched by a pin, counted on while any powered device
-  uses it (`hal_device_power()`).
+  uses it (`hal_device_power()`). Probing turns it off, unless it has
+  `.keep` and is on: after an ESP restart (an expander keeps its outputs)
+  the chip behind it keeps running, and its driver takes it from there.
 - **Hogs** (`hal_hog.h`): pins held active or inactive from boot, for chips
   with no driver yet or that must stay quiet until theirs runs (Linux's
   GPIO hogs), such as chip selects on a shared SPI bus.

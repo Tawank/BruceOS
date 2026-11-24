@@ -4,9 +4,11 @@
 #include "freertos/task.h"
 #include "hal_gpio.h"
 
-/* Off until someone uses it. */
+/* Off until someone uses it, unless it is to be kept and is on. */
 static bruce_result_t hal_rail__probe(const hal_device_t *device) {
     const hal_rail_config_t *config = device->config;
+    bool on = false;
+    if (config->keep && hal_pin_get(&config->enable, &on) == BRUCE_OK && on) return BRUCE_OK;
     return hal_pin_set(&config->enable, false);
 }
 

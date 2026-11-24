@@ -30,6 +30,7 @@ typedef enum {
     HAL_CLASS_BATTERY,
     HAL_CLASS_TOUCH,
     HAL_CLASS_KEYPAD,
+    HAL_CLASS_IMU,
     HAL_CLASS_COUNT,
 } hal_class_t;
 

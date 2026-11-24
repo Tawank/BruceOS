@@ -7,6 +7,7 @@
 typedef struct {
     hal_pin_t enable;     /* Active = on. */
     uint16_t on_delay_ms; /* To settle after switching on. */
+    bool keep;            /* Found on at probe (an ESP restart): left on for its device's driver. */
 } hal_rail_config_t;
 
 extern const hal_driver_t hal_rail_driver;

@@ -29,6 +29,9 @@
 #define MAPS_ARRIVED_M 25
 #define MAPS_ARRIVED_HINT_MS 5000
 #define MAPS_TURN_DEG 15.0f
+/* Turning the device turns the 3D view, in steps of at least this. */
+#define MAPS_MOTION_POLL_MS 100
+#define MAPS_MOTION_STEP_DEG 2.0f
 
 typedef struct {
     settings_t settings;
@@ -51,6 +54,10 @@ typedef struct {
     bool locate_pending; /* Centre on the first fix. */
     uint64_t gps_at;
     uint64_t gps_started_at;
+    uint64_t motion_at;
+    bool motion_have;  /* motion_yaw holds the last reading. */
+    float motion_yaw;  /* Counterclockwise. */
+    float motion_turn; /* Turned since the view last followed. */
     char gps_text[40];
     /* What the running search is for. */
     enum { MAPS_FIND_PLACE, MAPS_FIND_DESTINATION, MAPS_FIND_START } finding;
@@ -631,6 +638,34 @@ static void maps__poll_gps(maps_t *app) {
     maps__navigate(app, now);
 }
 
+/* The 3D view turns with the device, GPS or not; moving with GPS still sets it to the way of travel. */
+static void maps__poll_motion(maps_t *app) {
+    uint64_t now = runtime__now();
+    if (!app->view3d.on) {
+        app->motion_have = false;
+        return;
+    }
+    if (now < app->motion_at) return;
+    app->motion_at = now + MAPS_MOTION_POLL_MS;
+    bruce_motion_t motion;
+    if (motion__read(&motion) != BRUCE_OK || !motion.ready) {
+        app->motion_have = false;
+        return;
+    }
+    if (app->motion_have) {
+        float change = fmodf(motion.yaw_deg - app->motion_yaw + 540.0f, 360.0f) - 180.0f;
+        /* Yaw turns counterclockwise, the heading clockwise. */
+        app->motion_turn -= change;
+        if (fabsf(app->motion_turn) >= MAPS_MOTION_STEP_DEG) {
+            view3d__turn(&app->view3d, app->motion_turn);
+            app->motion_turn = 0;
+            app->dirty = true;
+        }
+    }
+    app->motion_yaw = motion.yaw_deg;
+    app->motion_have = true;
+}
+
 static void maps__toggle_online(maps_t *app) {
     tiles__set_online(&app->tiles, !app->tiles.online);
     settings__save_online(app->tiles.online);
@@ -882,6 +917,7 @@ static void maps__run(maps_t *app) {
         maps__poll_search(app);
         maps__poll_route(app);
         maps__poll_gps(app);
+        maps__poll_motion(app);
         if (tiles__check_network(&app->tiles)) app->dirty = true;
         if (display__viewport_changed()) app->dirty = true;
 
