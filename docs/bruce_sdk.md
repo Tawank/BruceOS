@@ -107,6 +107,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `config__get_launcher` (config.h)
 - `config__set_launcher` (config.h)
 - `config__set_display_dim_timeout` (config.h)
+- `config__set_display_sleep_timeout` (config.h)
 - `config__set_display_brightness` (config.h)
 - `config__set_time_automatic_update_via_ntp` (config.h)
 - `config__set_time_timezone` (config.h)
@@ -6424,6 +6425,46 @@ Sets the screen dim timeout.
 
 ---
 
+## config__get_display_sleep_timeout()
+
+```c
+int config__get_display_sleep_timeout(void);
+```
+
+Seconds without input before the device suspends; 0 never. @permission config
+
+### Returns
+
+`int`
+
+
+---
+
+## config__set_display_sleep_timeout()
+
+```c
+bruce_result_t config__set_display_sleep_timeout(int value);
+```
+
+Sets the sleep timeout.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `value` | `int` | Seconds (0 never, at most 3600). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `config`
+
+
+---
+
 ## config__get_display_brightness()
 
 ```c
@@ -7400,7 +7441,7 @@ without a latch enter deep sleep directly.
 bruce_result_t device__sleep(void);
 ```
 
-Light-sleeps the whole device until the Select button is pressed.
+Light-sleeps the whole device until Select or a key is pressed.
 
 Blocks until wake-up. Everything pauses meanwhile and the backlight is
 off; an e-paper panel keeps showing what it shows now (drawing still in
@@ -7416,6 +7457,31 @@ to be released first.
 #### Permissions
 
 - `process`
+
+
+---
+
+## device__prevent_sleep()
+
+```c
+bruce_result_t device__prevent_sleep(bool prevent);
+```
+
+Keeps the device from sleeping when idle, or lets it again.
+
+The screen still dims. Cleared when the process ends.
+
+@return BRUCE_ERR_RESOURCE_LIMIT when too many processes hold it.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `prevent` | `bool` | true to hold the device awake. |
+
+### Returns
+
+`bruce_result_t`
 
 
 ---

@@ -57,6 +57,7 @@ typedef struct {
 
     /* General settings */
     int displayDimTimeout;
+    int displaySleepTimeout; /* Seconds idle before suspending; 0 never. */
     int displayBrightness;
     bool timeAutomaticUpdateViaNTP;
     float timeTimezone;

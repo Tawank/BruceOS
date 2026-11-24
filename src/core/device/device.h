@@ -12,6 +12,10 @@
 void device__power_hold_init(void);
 /* The keyboard backlight at its setting (on) or off, without saving. */
 void device__keyboard_light_apply(bool on);
+/* Why the device must not sleep now ("app", "call", "audio", "usb"), or NULL. */
+const char *device__awake_reason(void);
+/* Screen dimming and the sleep timeout; the input process calls it every poll. */
+void device__idle_poll(void);
 
 /* The latest battery level from an I2C gauge, set by device_bus; what
  * device__get_battery() returns on those boards. */

@@ -46,7 +46,7 @@ bruce_result_t device__restart(uint32_t delay_ms);
 bruce_result_t device__power_off(uint32_t delay_ms);
 
 /**
- * @brief Light-sleeps the whole device until the Select button is pressed.
+ * @brief Light-sleeps the whole device until Select or a key is pressed.
  *
  * Blocks until wake-up. Everything pauses meanwhile and the backlight is
  * off; an e-paper panel keeps showing what it shows now (drawing still in
@@ -57,6 +57,16 @@ bruce_result_t device__power_off(uint32_t delay_ms);
  * @permission process
  */
 bruce_result_t device__sleep(void);
+
+/**
+ * @brief Keeps the device from sleeping when idle, or lets it again.
+ *
+ * The screen still dims. Cleared when the process ends.
+ *
+ * @param prevent true to hold the device awake.
+ * @return BRUCE_ERR_RESOURCE_LIMIT when too many processes hold it.
+ */
+bruce_result_t device__prevent_sleep(bool prevent);
 
 /** @brief Whether the board has a keyboard backlight. */
 bool device__has_keyboard_light(void);

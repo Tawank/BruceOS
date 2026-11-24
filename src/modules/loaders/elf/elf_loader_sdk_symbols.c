@@ -2062,6 +2062,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(device__coredump_get_summary),
     ESP_ELFSYM_EXPORT(device__coredump_read),
     ESP_ELFSYM_EXPORT(device__coredump_erase),
+    ESP_ELFSYM_EXPORT(device__prevent_sleep),
     ESP_ELFSYM_EXPORT(device__has_keyboard_light),
     ESP_ELFSYM_EXPORT(device__set_keyboard_light),
 

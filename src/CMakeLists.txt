@@ -118,6 +118,8 @@ idf_component_register(SRCS
                     "core/gps/gps.c"
                     "core/haptic/haptic.c"
                     "core/device/keyboard_light.c"
+                    "core/device/device_awake.c"
+                    "core/device/device_idle.c"
                     "core/motion/motion.c"
                     "core/hash/hash.c"
                     "core/html/html_entities.c"

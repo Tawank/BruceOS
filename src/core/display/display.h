@@ -14,6 +14,11 @@ bruce_result_t display__flush(void);
 /* Shutdown/suspend: an e-paper panel stops refreshing and keeps its picture
  * (waiting for a refresh already running) until unfrozen. No-op on LCDs. */
 void display__freeze(bool frozen);
+/* Idle: the backlight at a quarter of its setting (still visible), or back
+ * to the setting. Not saved; display__set_brightness() is. */
+void display__dim(bool dimmed);
+/* Sleep: the backlight off, or back to its setting. Not saved. */
+void display__light_off(bool off);
 
 void display__process_created(bruce_process_id_t process_id, bool gui_requested);
 void display__process_set_gui_requested(bruce_process_id_t process_id);

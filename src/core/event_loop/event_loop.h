@@ -16,3 +16,8 @@ void event_loop__foreground_changed(bruce_process_id_t process_id);
 /* While true, injected input is dropped: the press that wakes the device from
  * sleep must not reach the app. */
 void event_loop__set_input_blocked(bool blocked);
+
+/* esp_timer milliseconds of the last input injected (not blocked); 0 before any. */
+uint64_t event_loop__last_input_ms(void);
+/* Counts as input for idle timing, without any event (waking from sleep). */
+void event_loop__note_input(void);

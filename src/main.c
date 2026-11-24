@@ -93,7 +93,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
 #endif
     {"shutdown",             "Power off the device",                                      "System",  bnu_shutdown_app_main,        0,     false},
     {"sleep",                "Pause for a duration",                                      "System",  bnu_sleep_app_main,           0,     false},
-    {"suspend",              "Sleep the device until Select is pressed",                  "System",  bnu_suspend_app_main,         0,     false},
+    {"suspend",              "Sleep the device until Select or a key",                  "System",  bnu_suspend_app_main,         0,     false},
     {"tone",                 "Play a square-wave audio tone",                             "System",  bnu_tone_app_main,            0,     false},
     {"ffplay",               "Minimal ffplay stand-in (plays local .wav)",                "System",  ffplay_app_main,              8192,  false},
     {"top",                  "Processes, CPU, RAM usage",                                 "System",  bnu_top_app_main,             0,     false},

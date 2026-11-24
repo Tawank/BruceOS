@@ -11,6 +11,7 @@
 #include "input_touch.h"
 #endif
 
+#include "core/device/device.h"
 #include "core_sdk/input.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
@@ -67,6 +68,7 @@ static void input_app__poll(void) {
     input_touch__poll();
 #endif
     input_encoder__poll();
+    device__idle_poll();
 #endif
 }
 

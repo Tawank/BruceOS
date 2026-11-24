@@ -1099,6 +1099,36 @@ bruce_result_t display__set_brightness(uint8_t brightness) {
     return result;
 }
 
+#define DISPLAY__DIM_FADE_MS 400
+
+void display__dim(bool dimmed) {
+    display__lock();
+    bool ready = s_initialized;
+    uint8_t brightness = s_brightness;
+    display__unlock();
+    if (!ready) return;
+    if (dimmed && brightness > 0) {
+        brightness /= 4;
+        if (brightness < DISPLAY__MIN_VISIBLE_BRIGHTNESS) brightness = DISPLAY__MIN_VISIBLE_BRIGHTNESS;
+    }
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    display_driver__fade_backlight(brightness, DISPLAY__DIM_FADE_MS);
+#endif
+}
+
+void display__light_off(bool off) {
+    display__lock();
+    bool ready = s_initialized;
+    uint8_t brightness = s_brightness;
+    display__unlock();
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    if (ready) display_driver__set_backlight(off ? 0 : brightness);
+#else
+    (void)ready;
+    (void)brightness;
+#endif
+}
+
 uint8_t display__get_brightness(void) {
     display__lock();
     uint8_t brightness = s_brightness;

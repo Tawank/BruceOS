@@ -936,7 +936,7 @@ static void cellular__vibrate(void) {
     (void)haptic__play(BRUCE_HAPTIC_ALERT);
 }
 
-static bool cellular__in_call(void) {
+bool cellular__in_call(void) {
     cellular__lock();
     bool in_call = s_model.call != BRUCE_CALL_NONE;
     cellular__unlock();
@@ -1876,6 +1876,8 @@ bruce_result_t cellular__set_enabled(bool enabled) {
     (void)enabled;
     return cellular__unsupported();
 }
+
+bool cellular__in_call(void) { return false; }
 
 bruce_result_t cellular__get_status(bruce_cellular_status_t *out) {
     if (out != NULL) memset(out, 0, sizeof(*out));

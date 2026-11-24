@@ -519,6 +519,29 @@ sleeps. Settings has it under Display & UI, and the shell as
 `config display keyboard-light [percent]`. It is off by default, as in
 LilyGO's firmware.
 
+### Dimming and sleep
+
+The input process calls `device__idle_poll()` (`core/device/device_idle.c`)
+every poll. Idle time counts from the last input `input__inject()` took
+(any source, Bluetooth HID included), a wake from sleep, or a call in
+progress, which keeps the screen up while it rings or talks.
+- **Dim** (`display.dimTimeout`, Display & UI > Dim time): the backlight
+  fades to a quarter of its setting (`display__dim()`, not saved) and the
+  keyboard light goes off; any input restores both.
+- **Sleep** (`display.sleepTimeout`, Display & UI > Sleep time,
+  `config display sleep N`; 0, the default, is never): Core starts
+  `suspend` in the background, unless `device__awake_reason()` names a
+  holder: a process that called `device__prevent_sleep(true)` (cleared when
+  it ends), a call, a file playing, or a USB host on the serial console
+  (a charger sends no frames, so it doesn't count). A held device tries again a
+  sleep time after it was last held.
+
+`device__sleep()` (`suspend`, the system menu's Sleep) is a manual light
+sleep: everything stops until Select, a key (the keypad's HAL `interrupt`
+pin, held active while key events wait; `hal_pin_wake()` swaps its edge
+interrupt for a level wake and back) or the modem's RI. Timers don't fire
+meanwhile. The backlight goes off and back without being saved.
+
 ### Cellular
 
 `core/cellular` drives a SIMCom A76xx modem (`BRUCE_CELLULAR_*` in Kconfig;

@@ -478,6 +478,17 @@ int config__get_display_dim_timeout(void);
  */
 bruce_result_t config__set_display_dim_timeout(int value);
 
+/** @brief Seconds without input before the device suspends; 0 never. @permission config */
+int config__get_display_sleep_timeout(void);
+
+/**
+ * @brief Sets the sleep timeout.
+ *
+ * @param value Seconds (0 never, at most 3600).
+ * @permission config
+ */
+bruce_result_t config__set_display_sleep_timeout(int value);
+
 /** @brief Display brightness (0-100). @permission config */
 int config__get_display_brightness(void);
 

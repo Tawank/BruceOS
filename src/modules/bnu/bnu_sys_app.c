@@ -935,7 +935,7 @@ int bnu_shutdown_app_main(int argc, char **argv) {
 
 int bnu_suspend_app_main(int argc, char **argv) {
     ArgParser *parser =
-        bnu__new_parser("Sleep until the Select button is pressed. An e-paper screen keeps its picture.");
+        bnu__new_parser("Sleep until Select or a key is pressed. An e-paper screen keeps its picture.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     ap_free(parser);

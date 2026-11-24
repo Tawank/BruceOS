@@ -199,6 +199,8 @@ static void config__validate(config__t *cfg) {
 
     if (cfg->displayDimTimeout < 0) cfg->displayDimTimeout = 10;
     if (cfg->displayDimTimeout > 60) cfg->displayDimTimeout = 0;
+    if (cfg->displaySleepTimeout < 0) cfg->displaySleepTimeout = 0;
+    if (cfg->displaySleepTimeout > 3600) cfg->displaySleepTimeout = 3600;
 
     if (cfg->displayBrightness > 100) cfg->displayBrightness = 100;
     if (cfg->displayFullRefreshEvery < 0) cfg->displayFullRefreshEvery = 30;
@@ -329,6 +331,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     if (cJSON_IsObject(display)) {
         json_get_int(display, "rotation", &cfg->displayRotation);
         json_get_int(display, "dimTimeout", &cfg->displayDimTimeout);
+        json_get_int(display, "sleepTimeout", &cfg->displaySleepTimeout);
         json_get_int(display, "brightness", &cfg->displayBrightness);
         json_get_bool(display, "bufferedRendering", &cfg->displayBufferedRendering);
         json_get_bool(display, "dmaFramebuffer", &cfg->displayDmaFramebuffer);
@@ -475,6 +478,7 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON *display = cJSON_AddObjectToObject(root, "display");
     cJSON_AddNumberToObject(display, "rotation", cfg->displayRotation);
     cJSON_AddNumberToObject(display, "dimTimeout", cfg->displayDimTimeout);
+    cJSON_AddNumberToObject(display, "sleepTimeout", cfg->displaySleepTimeout);
     cJSON_AddNumberToObject(display, "brightness", cfg->displayBrightness);
     cJSON_AddBoolToObject(display, "bufferedRendering", cfg->displayBufferedRendering);
     cJSON_AddBoolToObject(display, "dmaFramebuffer", cfg->displayDmaFramebuffer);
@@ -968,6 +972,7 @@ CONFIG__DEFINE_INT_FIELD(display_dither, displayDither)
 CONFIG__DEFINE_STRING_FIELD(launcher, launcher, CONFIG__LAUNCHER_APP_MAX_LEN)
 
 CONFIG__DEFINE_INT_FIELD(display_dim_timeout, displayDimTimeout)
+CONFIG__DEFINE_INT_FIELD(display_sleep_timeout, displaySleepTimeout)
 CONFIG__DEFINE_INT_FIELD(display_brightness, displayBrightness)
 CONFIG__DEFINE_BOOL_FIELD(time_automatic_update_via_ntp, timeAutomaticUpdateViaNTP)
 CONFIG__DEFINE_FLOAT_FIELD(time_timezone, timeTimezone)
