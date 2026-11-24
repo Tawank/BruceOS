@@ -19,6 +19,13 @@ HAL_DEVICE(i2c0, .driver = &hal_i2c_master_driver, .config = &i2c0_config);
 static const hal_spi_master_config_t spi2_config = {.host = SPI2_HOST, .sck = 36, .mosi = 33, .miso = 47, .max_transfer = 4096};
 HAL_DEVICE(spi2, .driver = &hal_spi_master_driver, .config = &spi2_config);
 
+/* No drivers yet: core/storage and core/display set them up on spi2. */
+HAL_DEVICE(sd, .bus = &spi2, HAL_PINS({"cs", HAL_SOC_PIN_LOW(48)}));
+/* GDEQ031T10 (UC8253). BUSY is low while the panel works; 41 is the front light. */
+HAL_DEVICE(display, .bus = &spi2,
+           HAL_PINS({"cs", HAL_SOC_PIN_LOW(34)}, {"dc", HAL_SOC_PIN(35)}, {"reset", HAL_SOC_PIN_LOW(9)},
+                    {"busy", HAL_SOC_PIN_LOW(37)}, {"backlight", HAL_SOC_PIN(41)}));
+
 /* Outputs at boot: 4 internal LoRa antenna, 6 speaker amplifier on,
  * 7 touch and 9 keyboard out of reset, whichever code then drives them. */
 static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6) | (1u << 7) | (1u << 9)};
@@ -45,4 +52,4 @@ HAL_DEVICE(modem,
                     {"audio-select", HAL_PIN(xl9555, 10)}), /* High: speaker and mic to the modem. */
            HAL_RAILS(&modem_power));
 
-HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);
+HAL_BOARD("LilyGO T-Deck MAX", &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard, &modem_power, &gps_power, &imu_power, &gps, &modem);

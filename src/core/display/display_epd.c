@@ -19,16 +19,18 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "hal/hal_gpio.h"
+#include "hal/hal_spi.h"
 
 #define TAG "bruce_epd"
 
 #define EPD__WIDTH CONFIG_BRUCE_DISPLAY_WIDTH
 #define EPD__HEIGHT CONFIG_BRUCE_DISPLAY_HEIGHT
 #define EPD__BYTES (EPD__WIDTH * EPD__HEIGHT / 8)
-#define EPD__HOST ((spi_host_device_t)CONFIG_BRUCE_DISPLAY_SPI_HOST)
-#define EPD__PIN_DC ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_DC)
-#define EPD__PIN_RST ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_RST)
-#define EPD__PIN_BUSY ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_BUSY)
+#define EPD__HOST (s_pins.host)
+#define EPD__PIN_DC (s_pins.dc)
+#define EPD__PIN_RST (s_pins.rst)
+#define EPD__PIN_BUSY (s_pins.busy)
 #define EPD__SPI_HZ 4000000
 #define EPD__CHUNK 4096        /* The SD card's bus allows no bigger transfers. */
 #define EPD__SETTLE_MS 40      /* Wait for drawing to stop before refreshing. */
@@ -39,11 +41,14 @@
 _Static_assert(EPD__WIDTH % 8 == 0 && EPD__WIDTH <= 256, "e-paper width must fit the partial window");
 #define EPD__FULL_IDLE_MS 2000 /* A due full refresh waits for this long without drawing. */
 
-#if CONFIG_BRUCE_SD_ENABLED && CONFIG_BRUCE_SD_SPI_HOST == CONFIG_BRUCE_DISPLAY_SPI_HOST
-#define EPD__PIN_MISO CONFIG_BRUCE_SD_PIN_MISO
-#else
-#define EPD__PIN_MISO -1
-#endif
+/* From board.c's "display" with BRUCE_DISPLAY_HAL, else Kconfig; set at init. */
+typedef struct {
+    spi_host_device_t host;
+    int sck, mosi, miso, cs;
+    gpio_num_t dc, rst, busy;
+} display_epd__pins_t;
+
+static display_epd__pins_t s_pins;
 
 /* One bit per pixel, 8 pixels across per byte, 1 = white. */
 static uint8_t *s_drawn;   /* What apps have drawn. */
@@ -277,11 +282,45 @@ static bruce_result_t display_epd__init_gpio(void) {
     return BRUCE_OK;
 }
 
+static bool display_epd__load_pins(void) {
+#if CONFIG_BRUCE_DISPLAY_HAL
+    const hal_device_t *display = hal_device_find("display");
+    const hal_spi_master_config_t *bus = hal_spi_bus_config(display);
+    if (bus == NULL) return false;
+    s_pins = (display_epd__pins_t){
+        .host = (spi_host_device_t)bus->host,
+        .sck = bus->sck,
+        .mosi = bus->mosi,
+        .miso = bus->miso,
+        .cs = hal_pin_soc_gpio(hal_device_pin(display, "cs")),
+        .dc = (gpio_num_t)hal_pin_soc_gpio(hal_device_pin(display, "dc")),
+        .rst = (gpio_num_t)hal_pin_soc_gpio(hal_device_pin(display, "reset")),
+        .busy = (gpio_num_t)hal_pin_soc_gpio(hal_device_pin(display, "busy")),
+    };
+#else
+    s_pins = (display_epd__pins_t){
+        .host = (spi_host_device_t)CONFIG_BRUCE_DISPLAY_SPI_HOST,
+        .sck = CONFIG_BRUCE_DISPLAY_PIN_SCK,
+        .mosi = CONFIG_BRUCE_DISPLAY_PIN_MOSI,
+#if CONFIG_BRUCE_SD_ENABLED && !CONFIG_BRUCE_SD_HAL && CONFIG_BRUCE_SD_SPI_HOST == CONFIG_BRUCE_DISPLAY_SPI_HOST
+        .miso = CONFIG_BRUCE_SD_PIN_MISO,
+#else
+        .miso = -1,
+#endif
+        .cs = CONFIG_BRUCE_DISPLAY_PIN_CS,
+        .dc = (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_DC,
+        .rst = (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_RST,
+        .busy = (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_BUSY,
+    };
+#endif
+    return s_pins.cs >= 0 && s_pins.dc >= 0 && s_pins.rst >= 0 && s_pins.busy >= 0;
+}
+
 static bruce_result_t display_epd__init_spi(void) {
     spi_bus_config_t bus = {
-        .sclk_io_num = CONFIG_BRUCE_DISPLAY_PIN_SCK,
-        .mosi_io_num = CONFIG_BRUCE_DISPLAY_PIN_MOSI,
-        .miso_io_num = EPD__PIN_MISO,
+        .sclk_io_num = s_pins.sck,
+        .mosi_io_num = s_pins.mosi,
+        .miso_io_num = s_pins.miso,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = EPD__CHUNK,
@@ -295,7 +334,7 @@ static bruce_result_t display_epd__init_spi(void) {
     spi_device_interface_config_t device = {
         .clock_speed_hz = EPD__SPI_HZ,
         .mode = 0,
-        .spics_io_num = CONFIG_BRUCE_DISPLAY_PIN_CS,
+        .spics_io_num = s_pins.cs,
         .cs_ena_pretrans = 2,
         .cs_ena_posttrans = 2,
         .queue_size = 1,
@@ -328,7 +367,8 @@ bruce_result_t display_epd__init(void) {
     memset(s_wear, 0, EPD__BYTES);
     s_wear_max = 0;
 
-    bruce_result_t result = display_epd__init_gpio();
+    bruce_result_t result = display_epd__load_pins() ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    if (result == BRUCE_OK) result = display_epd__init_gpio();
     if (result == BRUCE_OK) result = display_epd__init_spi();
     if (result == BRUCE_OK && xTaskCreate(display_epd__task, "epd", 4096, NULL, 3, &s_task) != pdPASS) {
         result = BRUCE_ERR_NO_MEMORY;

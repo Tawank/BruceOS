@@ -14,6 +14,7 @@
 #include "esp_lcd_panel_vendor.h" // IWYU pragma: keep
 #include "esp_log.h"
 #include "esp_private/esp_gpio_reserve.h"
+#include "hal/hal_gpio.h"
 
 #include <string.h>
 
@@ -22,7 +23,7 @@
 #define DISPLAY__PIN_CS ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_CS)
 #define DISPLAY__PIN_DC ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_DC)
 #define DISPLAY__PIN_RST ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_RST)
-#define DISPLAY__PIN_BL ((gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_BL)
+#define DISPLAY__PIN_BL ((gpio_num_t)display_driver__pin_bl())
 
 #if CONFIG_BRUCE_DISPLAY_BUS_SPI
 #define DISPLAY__SPI_HOST ((spi_host_device_t)CONFIG_BRUCE_DISPLAY_SPI_HOST)
@@ -53,25 +54,37 @@
 
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
+#if !CONFIG_BRUCE_DISPLAY_PANEL_UC8253
 static bool s_spi_bus_initialized;
+#endif
 #if CONFIG_BRUCE_DISPLAY_BUS_I80
 static esp_lcd_i80_bus_handle_t s_i80_bus;
 #endif
 static bool s_backlight_initialized;
 
-void display_driver__boot_backlight_off(void) {
-#if CONFIG_BRUCE_DISPLAY_PIN_BL >= 0
-    gpio_config_t bl_gpio = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
-    };
-    (void)gpio_config(&bl_gpio);
-    (void)gpio_set_level(DISPLAY__PIN_BL, 0);
-    /* Hand the pin back so the backlight PWM can claim it without a conflict warning. */
-    (void)esp_gpio_revoke(1ULL << DISPLAY__PIN_BL);
+/* board.c's "display" backlight pin with BRUCE_DISPLAY_HAL, else Kconfig; -1 for none. */
+static int display_driver__pin_bl(void) {
+#if CONFIG_BRUCE_DISPLAY_HAL
+    return hal_pin_soc_gpio(hal_device_pin(hal_device_find("display"), "backlight"));
+#else
+    return CONFIG_BRUCE_DISPLAY_PIN_BL;
 #endif
 }
 
+void display_driver__boot_backlight_off(void) {
+    int pin = display_driver__pin_bl();
+    if (pin < 0) return;
+    gpio_config_t bl_gpio = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << pin,
+    };
+    (void)gpio_config(&bl_gpio);
+    (void)gpio_set_level((gpio_num_t)pin, 0);
+    /* Hand the pin back so the backlight PWM can claim it without a conflict warning. */
+    (void)esp_gpio_revoke(1ULL << pin);
+}
+
+#if !CONFIG_BRUCE_DISPLAY_PANEL_UC8253
 static bool display_driver__on_color_trans_done(
     esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *event_data, void *user_ctx
 ) {
@@ -84,6 +97,7 @@ static bool display_driver__on_color_trans_done(
 #endif
     return task_woken;
 }
+#endif
 
 static bruce_result_t display_driver__backlight_init(void) {
 #if CONFIG_BRUCE_DISPLAY_BACKLIGHT_I2C_EXPANDER_ENABLED
@@ -273,6 +287,7 @@ static bruce_result_t display_driver__panel_init(void) {
     }
 #endif
 
+#if !CONFIG_BRUCE_DISPLAY_PANEL_UC8253
     esp_lcd_panel_io_callbacks_t callbacks = {.on_color_trans_done = display_driver__on_color_trans_done};
     if (esp_lcd_panel_io_register_event_callbacks(s_io, &callbacks, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "failed to register panel completion callback");
@@ -308,6 +323,7 @@ static bruce_result_t display_driver__panel_init(void) {
     esp_lcd_panel_invert_color(s_panel, true);
     esp_lcd_panel_disp_on_off(s_panel, true);
     return BRUCE_OK;
+#endif
 }
 
 bruce_result_t display_driver__init(void) {
@@ -341,7 +357,7 @@ void display_driver__deinit(void) {
         esp_lcd_del_i80_bus(s_i80_bus);
         s_i80_bus = NULL;
     }
-#else
+#elif !CONFIG_BRUCE_DISPLAY_PANEL_UC8253
     if (s_spi_bus_initialized) {
         spi_bus_free(DISPLAY__SPI_HOST);
         s_spi_bus_initialized = false;

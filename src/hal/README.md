@@ -73,7 +73,11 @@ with `hal_i2c_open()` or `hal_spi_open()` and never names a port, host or
 bus pin. Code in `src/core` that still sets up its own chips uses the same
 buses: with `CONFIG_BRUCE_BOARD_I2C_HAL`, `board_i2c__acquire()`,
 `board_i2c__pins()` and `board_i2c__speed_hz()` give the first HAL I2C bus
-and its `hal_i2c_master_config_t` instead of the Kconfig pins, and the SD
+and its `hal_i2c_master_config_t` instead of the Kconfig pins. With
+`CONFIG_BRUCE_SD_HAL` and `CONFIG_BRUCE_DISPLAY_HAL` (e-paper so far), the
+SD card and display take their chip's pins from board.c's driverless `sd`
+and `display` devices and the host and bus pins from their bus
+(`hal_spi_bus_config()`). The SD
 card and display drivers find the SPI host already set up and only add
 their chip to it.
 

@@ -7,6 +7,8 @@
 #include "driver/spi_master.h" // IWYU pragma: export
 #include "esp_flash.h"
 #include "esp_partition.h"
+#include "hal/hal_gpio.h"
+#include "hal/hal_spi.h"
 
 static void disk__set_text(char *destination, size_t capacity, const char *value) {
     if (capacity == 0) return;
@@ -113,6 +115,20 @@ static bool disk__sd_mount_default(void) {
      * firmware tests ever get a chance to run. */
     return false;
 #else
+#if CONFIG_BRUCE_SD_HAL
+    /* board.c's "sd": its chip select, and its bus's host and pins. */
+    const hal_device_t *sd = hal_device_find("sd");
+    const hal_spi_master_config_t *bus = hal_spi_bus_config(sd);
+    int cs = hal_pin_soc_gpio(hal_device_pin(sd, "cs"));
+    if (bus == NULL || cs < 0) return false;
+    const storage__sdspi_config_t config = {
+        .host = (spi_host_device_t)bus->host,
+        .mosi_gpio = bus->mosi,
+        .miso_gpio = bus->miso,
+        .sck_gpio = bus->sck,
+        .cs_gpio = cs,
+    };
+#else
     const storage__sdspi_config_t config = {
         .host = (spi_host_device_t)CONFIG_BRUCE_SD_SPI_HOST,
         .mosi_gpio = CONFIG_BRUCE_SD_PIN_MOSI,
@@ -120,6 +136,7 @@ static bool disk__sd_mount_default(void) {
         .sck_gpio = CONFIG_BRUCE_SD_PIN_SCK,
         .cs_gpio = CONFIG_BRUCE_SD_PIN_CS,
     };
+#endif
     return storage__sd_mount_spi(&config);
 #endif
 }

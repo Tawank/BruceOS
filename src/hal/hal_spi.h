@@ -26,3 +26,7 @@ typedef struct {
 } hal_spi_master_config_t;
 
 extern const hal_driver_t hal_spi_master_driver;
+
+/* The settings of `device`'s parent SPI bus (host and pins), for code that
+ * still sets up its own chip on it; NULL when the parent isn't one. */
+const hal_spi_master_config_t *hal_spi_bus_config(const hal_device_t *device);

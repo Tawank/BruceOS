@@ -8,6 +8,11 @@ bruce_result_t hal_spi_open(const hal_device_t *device, const spi_device_interfa
     return api->add_device(bus, config, out);
 }
 
+const hal_spi_master_config_t *hal_spi_bus_config(const hal_device_t *device) {
+    const hal_device_t *bus = device != NULL ? device->bus : NULL;
+    return bus != NULL && bus->driver == &hal_spi_master_driver ? bus->config : NULL;
+}
+
 static bruce_result_t hal_spi_master__probe(const hal_device_t *device) {
     const hal_spi_master_config_t *config = device->config;
     if (config == NULL) return BRUCE_ERR_INVALID_ARGUMENT;

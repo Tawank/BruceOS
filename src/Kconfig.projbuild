@@ -175,9 +175,18 @@ menu "Bruce hardware configuration"
                 depends on !BRUCE_DISPLAY_PANEL_UC8253
         endchoice
 
+        config BRUCE_DISPLAY_HAL
+            bool "Pins from the board file (board.c)"
+            depends on BRUCE_DISPLAY_PANEL_UC8253
+            default n
+            help
+                board.c's "display" device: pins "cs", "dc", "reset",
+                "busy" and "backlight", on its SPI bus's host and pins,
+                instead of the pin options below.
+
         config BRUCE_DISPLAY_SPI_HOST
             int "LCD SPI host"
-            depends on BRUCE_DISPLAY_BUS_SPI
+            depends on BRUCE_DISPLAY_BUS_SPI && !BRUCE_DISPLAY_HAL
             default 1
             range 0 2
             help
@@ -186,13 +195,13 @@ menu "Bruce hardware configuration"
 
         config BRUCE_DISPLAY_PIN_MOSI
             int "LCD MOSI GPIO"
-            depends on BRUCE_DISPLAY_BUS_SPI
+            depends on BRUCE_DISPLAY_BUS_SPI && !BRUCE_DISPLAY_HAL
             default 35
             range 0 48
 
         config BRUCE_DISPLAY_PIN_SCK
             int "LCD SCK GPIO"
-            depends on BRUCE_DISPLAY_BUS_SPI
+            depends on BRUCE_DISPLAY_BUS_SPI && !BRUCE_DISPLAY_HAL
             default 36
             range 0 48
 
@@ -275,16 +284,19 @@ menu "Bruce hardware configuration"
 
         config BRUCE_DISPLAY_PIN_CS
             int "LCD CS GPIO"
+            depends on !BRUCE_DISPLAY_HAL
             default 37
             range 0 48
 
         config BRUCE_DISPLAY_PIN_DC
             int "LCD DC GPIO"
+            depends on !BRUCE_DISPLAY_HAL
             default 34
             range 0 48
 
         config BRUCE_DISPLAY_PIN_RST
             int "LCD RST GPIO"
+            depends on !BRUCE_DISPLAY_HAL
             default 33
             range -1 48
             help
@@ -293,6 +305,7 @@ menu "Bruce hardware configuration"
 
         config BRUCE_DISPLAY_PIN_BL
             int "LCD backlight GPIO"
+            depends on !BRUCE_DISPLAY_HAL
             default 38
             range -1 48
             help
@@ -304,7 +317,7 @@ menu "Bruce hardware configuration"
 
         config BRUCE_DISPLAY_PIN_BUSY
             int "E-paper BUSY GPIO"
-            depends on BRUCE_DISPLAY_PANEL_UC8253
+            depends on BRUCE_DISPLAY_PANEL_UC8253 && !BRUCE_DISPLAY_HAL
             default -1
             range -1 48
 
@@ -555,9 +568,17 @@ menu "Bruce hardware configuration"
             bool "SD card slot available"
             default y
 
+        config BRUCE_SD_HAL
+            bool "Pins from the board file (board.c)"
+            depends on BRUCE_SD_ENABLED
+            default n
+            help
+                board.c's "sd" device: its "cs" pin, on its SPI bus's host
+                and pins, instead of the options below.
+
         config BRUCE_SD_SPI_HOST
             int "SD card SPI host"
-            depends on BRUCE_SD_ENABLED
+            depends on BRUCE_SD_ENABLED && !BRUCE_SD_HAL
             default 2
             range 0 2
             help
@@ -568,25 +589,25 @@ menu "Bruce hardware configuration"
 
         config BRUCE_SD_PIN_MOSI
             int "SD card MOSI GPIO"
-            depends on BRUCE_SD_ENABLED
+            depends on BRUCE_SD_ENABLED && !BRUCE_SD_HAL
             default 14
             range 0 48
 
         config BRUCE_SD_PIN_MISO
             int "SD card MISO GPIO"
-            depends on BRUCE_SD_ENABLED
+            depends on BRUCE_SD_ENABLED && !BRUCE_SD_HAL
             default 39
             range 0 48
 
         config BRUCE_SD_PIN_SCK
             int "SD card SCK GPIO"
-            depends on BRUCE_SD_ENABLED
+            depends on BRUCE_SD_ENABLED && !BRUCE_SD_HAL
             default 40
             range 0 48
 
         config BRUCE_SD_PIN_CS
             int "SD card CS GPIO"
-            depends on BRUCE_SD_ENABLED
+            depends on BRUCE_SD_ENABLED && !BRUCE_SD_HAL
             default 12
             range 0 48
     endmenu
