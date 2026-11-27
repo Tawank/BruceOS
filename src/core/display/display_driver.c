@@ -173,7 +173,11 @@ static bruce_result_t display_driver__backlight_init(void) {
         .duty_resolution = DISPLAY__LEDC_TIMER_RESOLUTION,
         .timer_num = DISPLAY__BL_LEDC_TIMER,
         .freq_hz = DISPLAY__BL_FREQ,
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+        .clk_cfg = LEDC_USE_RC_FAST_CLK, /* Runs in light sleep, so the light stays on. */
+#else
         .clk_cfg = LEDC_USE_APB_CLK,
+#endif
     };
     if (ledc_timer_config(&timer) != ESP_OK) {
         ESP_LOGE(TAG, "failed to configure LEDC timer");
@@ -187,6 +191,9 @@ static bruce_result_t display_driver__backlight_init(void) {
         .timer_sel = DISPLAY__BL_LEDC_TIMER,
         .duty = 0,
         .hpoint = 0,
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+        .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
+#endif
     };
     if (ledc_channel_config(&channel) != ESP_OK) {
         ESP_LOGE(TAG, "failed to configure LEDC channel");

@@ -14,6 +14,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
+#include "audio_power.h"
 #include "core_sdk/storage.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -107,6 +108,8 @@ static void audio__ensure_mutex(void) {
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
 static i2s_chan_handle_t s_i2s_tx_channel;
 static bool s_i2s_tx_ready;
+static bool s_i2s_tx_stopped; /* Clocks stopped while silent (audio__power_idle()). */
+static uint64_t s_i2s_used_at;
 
 #if CONFIG_BRUCE_AUDIO_ES8311_CODEC
 /* DAC-only bring-up of the ES8311 as an I2S slave, 48 kHz 16-bit, after
@@ -293,6 +296,14 @@ static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_dat
  * actively driven, with real audio or with the silence audio__i2s_on_sent()
  * writes whenever nothing is playing. */
 static bruce_result_t audio__i2s_ensure_channel_locked(void) {
+    s_i2s_used_at = runtime__now();
+    if (s_i2s_tx_ready && s_i2s_tx_stopped) {
+        if (i2s_channel_enable(s_i2s_tx_channel) != ESP_OK) return BRUCE_ERR_INTERNAL;
+        s_i2s_tx_stopped = false;
+#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+        (void)audio__es8311_enable();
+#endif
+    }
     if (s_i2s_tx_ready) return BRUCE_OK;
 
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -361,7 +372,7 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
  * slot went inactive, so it can never be reading freed memory. */
 static void audio__slot_teardown_locked(audio__slot_t *slot) {
     atomic_store(&slot->active, false);
-    if (s_i2s_tx_ready) {
+    if (s_i2s_tx_ready && !s_i2s_tx_stopped) {
         uint32_t ticks = atomic_load(&s_isr_ticks);
         for (int wait = 0; wait < 10 && atomic_load(&s_isr_ticks) == ticks; ++wait) vTaskDelay(1);
     }
@@ -2079,4 +2090,25 @@ uint32_t audio__file_duration_ms(void) {
     }
     xSemaphoreGive(s_audio_mutex);
     return ms;
+}
+
+#define AUDIO__IDLE_STOP_MS 3000
+
+/* Only where the chip light-sleeps by itself; elsewhere the clocks keep
+ * running as before. i2s_channel_disable() keeps the pins driven, so the
+ * amplifier doesn't hiss as it did on released (floating) pins. */
+void audio__power_idle(void) {
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE && CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
+    if (!s_i2s_tx_ready || s_i2s_tx_stopped || runtime__now() - s_i2s_used_at < AUDIO__IDLE_STOP_MS) return;
+    audio__ensure_mutex();
+    if (xSemaphoreTake(s_audio_mutex, 0) != pdTRUE) return;
+    bool busy = atomic_load(&s_tone_frames) != 0;
+    for (uint32_t i = 0; i < AUDIO__STREAM_SLOTS && !busy; ++i) busy = atomic_load(&s_slots[i].active);
+    if (busy) {
+        s_i2s_used_at = runtime__now();
+    } else if (i2s_channel_disable(s_i2s_tx_channel) == ESP_OK) {
+        s_i2s_tx_stopped = true;
+    }
+    xSemaphoreGive(s_audio_mutex);
+#endif
 }

@@ -1143,6 +1143,28 @@ static void cellular__resync(void) {
     if (missed) notification__push("New message", BRUCE_NOTIFICATION_DURATION_MAX_MS);
 }
 
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE && CONFIG_BRUCE_CELLULAR_RI_GPIO >= 0
+static const hal_pin_t s_ri = {.number = CONFIG_BRUCE_CELLULAR_RI_GPIO, .flags = HAL_PIN_ACTIVE_LOW};
+static bool s_ri_armed;
+
+/* RI pulses for each call, text and report. If the chip may have been
+ * asleep, the UART missed part of it: ask the modem, as after a suspend. */
+static void cellular__ri_check(void) {
+    if (!s_ri_armed) {
+        s_ri_armed = hal_pin_irq_enable(&s_ri) == BRUCE_OK;
+        return;
+    }
+    if (!hal_pin_irq_take(&s_ri) || device__pm_awake()) return;
+    cellular__lock();
+    s_sleep_sms_used = s_model.sms_used;
+    s_sleep_sequence = s_message_sequence;
+    cellular__unlock();
+    s_after_sleep = true;
+}
+#else
+static void cellular__ri_check(void) {}
+#endif
+
 static void cellular__run_request(cellular__request_t *request) {
     if (!s_alive) {
         request->result = BRUCE_ERR_INVALID_STATE;
@@ -1466,6 +1488,7 @@ static void cellular__session(void) {
         cellular__incoming();
         cellular__vibrate();
         cellular__sms_arrived();
+        cellular__ri_check();
         cellular__resync();
         cellular__update_status_icon();
         cellular__data_step();
@@ -1598,6 +1621,8 @@ bruce_result_t cellular__get_status(bruce_cellular_status_t *out) {
 }
 
 bool cellular__data_online(void) { return s_data_connected; }
+
+bool cellular__mux_running(void) { return s_mux; }
 
 bool cellular__data_pending(void) {
     return s_enabled && !s_failed && s_data_enabled && !s_data_failed && !s_data_connected;
@@ -1934,6 +1959,8 @@ bruce_result_t cellular__send_message(const char *number, const char *text) {
 }
 
 bool cellular__data_online(void) { return false; }
+
+bool cellular__mux_running(void) { return false; }
 
 bool cellular__data_pending(void) { return false; }
 

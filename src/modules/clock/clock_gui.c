@@ -3,6 +3,7 @@
 #include "clock_overlay.h"
 #include "core_sdk/app_config.h"
 #include "core_sdk/audio.h"
+#include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -71,6 +72,7 @@ static void clock_gui__announce(const clock_event_t *event) {
     clock_screens__format_seconds(event->seconds, formatted, sizeof(formatted));
     if (event->kind == CLOCK_EVENT_TIMER) snprintf(text, sizeof(text), "Timer %s is up", formatted);
     else snprintf(text, sizeof(text), "Alarm %.5s", formatted);
+    (void)device__wake();
     if (process__is_background()) (void)notification__push(text, CLOCK_GUI__NOTIFICATION_MS);
     for (int beep = 0; beep < 3; ++beep) {
         (void)audio__tone(1500, 150, false);

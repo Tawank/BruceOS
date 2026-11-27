@@ -4,6 +4,7 @@
 #include "core_sdk/args.h"
 #include "core_sdk/audio.h"
 #include "core_sdk/clock.h"
+#include "core_sdk/device.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -32,6 +33,7 @@ static bool clock_app__parse_alarm(const char *text, uint32_t *out_seconds_of_da
 }
 
 static void clock_app__ring(void) {
+    (void)device__wake();
     for (int beep = 0; beep < 3; ++beep) {
         (void)audio__tone(1500, 150, false);
         (void)runtime__delay(100);

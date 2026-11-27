@@ -170,9 +170,17 @@ void input_buttons__poll(void) {
     }
 }
 
+bool input_buttons__busy(void) {
+    for (size_t i = 0; i < sizeof(s_buttons) / sizeof(s_buttons[0]); ++i) {
+        if (s_buttons[i].pending || s_buttons[i].last_stable) return true;
+    }
+    return false;
+}
+
 #else
 
 void input_buttons__init(void) {}
 void input_buttons__poll(void) {}
+bool input_buttons__busy(void) { return false; }
 
 #endif

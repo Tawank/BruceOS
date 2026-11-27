@@ -120,6 +120,7 @@ idf_component_register(SRCS
                     "core/device/keyboard_light.c"
                     "core/device/device_awake.c"
                     "core/device/device_idle.c"
+                    "core/device/device_pm.c"
                     "core/motion/motion.c"
                     "core/hash/hash.c"
                     "core/html/html_entities.c"
@@ -339,6 +340,7 @@ idf_component_register(SRCS
                     esp_lcd_touch
                     esp_lcd_touch_ft5x06
                     esp_timer
+                    esp_pm
                     esp_jpeg
                     lvgl
                     esp_hid

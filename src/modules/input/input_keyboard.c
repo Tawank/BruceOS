@@ -568,9 +568,19 @@ void input_keyboard__poll(void) {
     if (hotkey_action[0] != '\0') input_hotkey__run_action(hotkey_action);
 }
 
+bool input_keyboard__busy(void) {
+    for (int y = 0; y < INPUT__KB_ROWS; ++y) {
+        for (int x = 0; x < INPUT__KB_COLS; ++x) {
+            if (s_kb_prev_pressed[y][x]) return true;
+        }
+    }
+    return false;
+}
+
 #else
 
 void input_keyboard__init(void) {}
 void input_keyboard__poll(void) {}
+bool input_keyboard__busy(void) { return false; }
 
 #endif

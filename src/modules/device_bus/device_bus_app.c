@@ -193,6 +193,7 @@ static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y, int32_t *out_
 static void device_bus__touch_publish(bruce_input_action_t action, int32_t x, int32_t y, int32_t key) {
     bruce_device_touch_message_t message = {.action = action, .x = x, .y = y, .key = key};
     (void)pubsub__publish(BRUCE_DEVICE_TOPIC_TOUCH, &message, sizeof(message));
+    device__wake_waiter(DEVICE__WAITER_INPUT);
 }
 
 static void device_bus__touch_poll(i2c_master_bus_handle_t bus) {
@@ -424,7 +425,13 @@ int device_bus_app_main(int argc, char **argv) {
             next_battery_poll_at = now + (read ? DEVICE_BUS__BATTERY_POLL_PERIOD_MS : DEVICE_BUS__BATTERY_RETRY_MS);
         }
 #endif
-        bruce_result_t result = runtime__sleep(DEVICE_BUS__POLL_PERIOD_MS);
+        /* Polls while touched; otherwise, where the chip light-sleeps, waits for the touch interrupt. */
+#if CONFIG_BRUCE_TOUCH_ENABLED
+        bool busy = s_touch_prev_pressed || s_touch_prev_key >= 0;
+#else
+        bool busy = false;
+#endif
+        bruce_result_t result = device__wait(DEVICE__WAITER_BUS, busy, DEVICE_BUS__POLL_PERIOD_MS);
         if (result != BRUCE_OK && process__current_signal() == 0) break;
     }
     return BRUCE_OK;

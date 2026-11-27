@@ -94,6 +94,8 @@ void cellular__power_off(void);
 void cellular__start(void);
 /* A call is ringing, dialling or up. */
 bool cellular__in_call(void);
+/* CMUX framing over the UART (mobile data): a lost byte breaks it. */
+bool cellular__mux_running(void);
 
 /* Before light sleep: the modem's RI GPIO to wake on, or -1. */
 int cellular__sleep_prepare(void);

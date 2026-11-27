@@ -4,3 +4,5 @@
  * src/Kconfig.projbuild's Input menu). No-ops if none are enabled. */
 void input_buttons__init(void);
 void input_buttons__poll(void);
+/* A button is down or settling. */
+bool input_buttons__busy(void);

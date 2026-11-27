@@ -19,3 +19,5 @@ bool gps__parse_sentence(const char *line, gps_parser_t *parser, bool *out_posit
 
 /* Cuts the receiver's power before deep sleep. */
 void gps__power_off(void);
+/* Receiving: its UART loses data while the chip sleeps. */
+bool gps__is_on(void);

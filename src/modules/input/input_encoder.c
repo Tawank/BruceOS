@@ -87,3 +87,11 @@ void input_encoder__init(void) {}
 void input_encoder__poll(void) {}
 
 #endif
+
+bool input_encoder__busy(void) {
+#if CONFIG_BRUCE_ENCODER_ENABLED
+    return true;
+#else
+    return false;
+#endif
+}

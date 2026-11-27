@@ -5,3 +5,5 @@
  * enabled. */
 void input_keyboard__init(void);
 void input_keyboard__poll(void);
+/* A key is held: hold hotkeys and modifiers need polling. */
+bool input_keyboard__busy(void);

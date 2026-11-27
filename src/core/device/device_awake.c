@@ -1,9 +1,11 @@
 #include "core/cellular/cellular.h"
 #include "core/device/device.h"
+#include "core/gps/gps.h"
 #include "core/process/process.h"
 #include "core_sdk/audio.h"
 #include "core_sdk/device.h"
 #include "core_sdk/process.h"
+#include "core_sdk/wifi.h"
 
 #include <stdint.h>
 
@@ -77,5 +79,13 @@ const char *device__awake_reason(void) {
     if (audio__file_is_playing()) return "audio";
     /* The console would drop; a charger alone sends no USB frames. */
     if (usb_serial_jtag_is_connected()) return "usb";
+    return NULL;
+}
+
+/* Things that work only with the chip awake, whether the screen is on or not. */
+const char *device__chip_reason(void) {
+    if (gps__is_on()) return "gps";
+    if (cellular__mux_running()) return "mobile data";
+    if (wifi__is_ap_running()) return "wifi ap"; /* Clients would wait out every sleep. */
     return NULL;
 }

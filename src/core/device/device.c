@@ -2,6 +2,7 @@
 
 #include "board_i2c.h"
 #include "hal/hal.h"
+#include "hal/hal_gpio.h"
 
 #include "core/display/display.h"
 #include "core/cellular/cellular.h"
@@ -102,7 +103,10 @@ bruce_result_t device__power_off(uint32_t delay_ms) {
 bruce_result_t device__sleep(void) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission != BRUCE_OK) return permission;
-#if CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_QEMU_TEST_MODE
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE && CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_QEMU_TEST_MODE
+    while (device__pm_select_pressed()) vTaskDelay(pdMS_TO_TICKS(20));
+    return device__pm_sleep();
+#elif CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_QEMU_TEST_MODE
     gpio_num_t pin = (gpio_num_t)CONFIG_BRUCE_BUTTON_SELECT_GPIO;
     while (gpio_get_level(pin) == 0) vTaskDelay(pdMS_TO_TICKS(20));
     /* An incoming call or text wakes the device too. */
@@ -111,6 +115,7 @@ bruce_result_t device__sleep(void) {
     display__freeze(true);
     display__light_off(true);
     device__keyboard_light_apply(false);
+    hal_pin_irq_wake_all(false); /* Keys and touch don't wake it. */
     gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL);
     if (ring_pin >= 0) gpio_wakeup_enable((gpio_num_t)ring_pin, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
@@ -120,6 +125,7 @@ bruce_result_t device__sleep(void) {
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     gpio_wakeup_disable(pin);
     if (ring_pin >= 0) gpio_wakeup_disable((gpio_num_t)ring_pin);
+    hal_pin_irq_wake_all(true);
     display__light_off(false);
     device__keyboard_light_apply(true);
     event_loop__note_input();
@@ -252,6 +258,7 @@ void device__power_hold_init(void) {
     gpio_config(&cfg);
     gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 1);
 #endif
+    device__pm_init();
     /* Power enables, resets and pins held from boot come up with the board's HAL devices. */
     hal__init();
 }

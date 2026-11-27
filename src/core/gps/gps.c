@@ -167,6 +167,8 @@ static void gps__power(bool on) { (void)hal_device_power(hal_device_find("gps"),
 
 void gps__power_off(void) { gps__power(false); }
 
+bool gps__is_on(void) { return s_on; }
+
 static bool gps__open(void) {
     uart_config_t config = {
         .baud_rate = CONFIG_BRUCE_GPS_BAUD,
@@ -296,6 +298,8 @@ bruce_result_t gps__read(bruce_gps_fix_t *out) {
 #else
 
 void gps__power_off(void) {}
+
+bool gps__is_on(void) { return false; }
 
 bool gps__is_available(void) { return false; }
 

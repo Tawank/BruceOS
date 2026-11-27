@@ -536,9 +536,40 @@ progress, which keeps the screen up while it rings or talks.
   (a charger sends no frames, so it doesn't count). A held device tries again a
   sleep time after it was last held.
 
-`device__sleep()` (`suspend`, the system menu's Sleep) is a manual light
-sleep: everything stops until Select or the modem's RI. Keys and touch
-don't wake it, so it isn't woken by accident. Timers don't fire meanwhile. The backlight goes off and back without being saved.
+**Automatic light sleep** (`core/device/device_pm.c`, boards with
+`CONFIG_FREERTOS_USE_TICKLESS_IDLE`, the T-Deck MAX so far): ESP-IDF
+light-sleeps the chip whenever every task is waiting, and wakes it for the
+next due delay, wait timeout or `esp_timer`, so any app's `runtime__delay()`
+or `runtime__sleep()` simply ends on time. Core holds an
+`ESP_PM_NO_LIGHT_SLEEP` lock for 5 s after input and while
+`device__awake_reason()` or `device__chip_reason()` names something (GPS on,
+the CMUX link for mobile data, a Wi-Fi access point). ESP-IDF holds its own
+while a USB host is connected (`USJ_NO_AUTO_LS_ON_CONNECTION`). There's no
+frequency scaling, so APB-clocked peripherals keep their timing.
+- **Waking:** HAL interrupt pins (`hal_pin_irq_enable()`: level-triggered and
+  masked until `hal_pin_irq_take()`, so the same level wakes light sleep)
+  for the keypad, touch, Select and the modem's RI.
+- **Pollers:** the input and `device_bus` processes wait in
+  `device__wait()` for one of those interrupts (up to a second), and poll
+  every 20 ms only while a key, button or finger is down.
+- **Modem:** an RI pulse while the chip may have slept starts the same
+  `AT+CLCC`/`AT+CPMS?` catch-up as after a suspend, since the UART missed
+  what came meanwhile.
+- **Backlights:** the display and keyboard backlights run LEDC from RC_FAST
+  with `LEDC_SLEEP_MODE_KEEP_ALIVE`, so they stay lit.
+- **Audio:** stops the I2S clocks (`i2s_channel_disable()`, pins still
+  driven) after 3 s of silence, since a running channel holds the chip awake.
+- **Bluetooth:** uses controller modem sleep on the main crystal.
+- **GPIO isolation:** `ESP_SLEEP_GPIO_RESET_WORKAROUND` is off, so pins keep
+  their levels.
+
+`device__sleep()` (`suspend`, the system menu's Sleep, the sleep time) waits
+for Select to be released, then turns the screen off and drops input until
+Select is pressed or a call comes in. With automatic light sleep the chip
+keeps running other processes meanwhile, and `device__wake()` (Clock's
+alarms and timers) turns the screen back on. Without it, it is a manual
+light sleep that stops everything until Select or the modem's RI. Keys and
+touch never end it, so it isn't woken by accident. The backlight goes off and back without being saved.
 
 ### Cellular
 

@@ -5,3 +5,5 @@
  * src/Kconfig.projbuild. No-ops if not enabled. */
 void input_encoder__init(void);
 void input_encoder__poll(void);
+/* True while enabled: it has no interrupt and must be polled. */
+bool input_encoder__busy(void);

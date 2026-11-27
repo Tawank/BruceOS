@@ -83,8 +83,15 @@ int input_app_main(int argc, char **argv) {
 
     while (process__current_signal() == 0) {
         input_app__poll();
+#if CONFIG_BRUCE_QEMU_TEST_MODE
         result = runtime__sleep(INPUT__POLL_PERIOD_MS);
         if (result != BRUCE_OK && process__current_signal() == 0) { return result; }
+#else
+        /* Polls while something is held; otherwise, where the chip light-sleeps,
+         * waits for a key, touch or button interrupt. */
+        bool busy = input_keyboard__busy() || input_buttons__busy() || input_encoder__busy();
+        (void)device__wait(DEVICE__WAITER_INPUT, busy, INPUT__POLL_PERIOD_MS);
+#endif
     }
     return BRUCE_OK;
 }

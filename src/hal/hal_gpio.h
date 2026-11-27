@@ -14,9 +14,14 @@ bruce_result_t hal_pin_get(const hal_pin_t *pin, bool *active);
 /* The SoC GPIO number, or -1 when the pin is on another controller. */
 int hal_pin_soc_gpio(const hal_pin_t *pin);
 
-/* Notes each active edge of a SoC pin (pulled up when active-low), for
- * hal_pin_irq_take(). Pins on other controllers: BRUCE_ERR_UNSUPPORTED. */
+/* Interrupts on a SoC pin's active level (pulled up when active-low), for
+ * hal_pin_irq_take(). The pin also wakes light sleep. Pins on other
+ * controllers: BRUCE_ERR_UNSUPPORTED. */
 bruce_result_t hal_pin_irq_enable(const hal_pin_t *pin);
-/* Whether an active edge came since the last call. Read the chip after
- * this, so an edge during the read is not lost. */
+/* Whether the pin was active since the last call; the interrupt is masked
+ * until then. Read the chip after this, so nothing during the read is lost. */
 bool hal_pin_irq_take(const hal_pin_t *pin);
+/* Called from the interrupt on any such pin (keep it short, ISR-safe). */
+void hal_pin_irq_set_hook(void (*hook)(void));
+/* Whether these pins wake light sleep (on after hal_pin_irq_enable()). */
+void hal_pin_irq_wake_all(bool on);

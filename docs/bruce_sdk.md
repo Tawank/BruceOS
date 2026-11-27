@@ -7441,12 +7441,14 @@ without a latch enter deep sleep directly.
 bruce_result_t device__sleep(void);
 ```
 
-Light-sleeps the whole device until the Select button is pressed.
+Puts the device to sleep until the Select button is pressed.
 
-Blocks until wake-up. Everything pauses meanwhile and the backlight is
-off; an e-paper panel keeps showing what it shows now (drawing still in
-progress is not shown -- see display__wait_shown()). Waits for the button
-to be released first.
+Blocks until wake-up. The backlight is off and input is dropped; an
+e-paper panel keeps showing what it shows now (drawing still in progress
+is not shown -- see display__wait_shown()). Waits for the button to be
+released first. On boards with automatic light sleep, other processes
+keep running: their delays and timers wake the chip when due, and
+device__wake() turns the screen back on. Elsewhere everything pauses.
 
 @return BRUCE_ERR_UNSUPPORTED on boards without a Select button.
 
@@ -7457,6 +7459,23 @@ to be released first.
 #### Permissions
 
 - `process`
+
+
+---
+
+## device__wake()
+
+```c
+bruce_result_t device__wake(void);
+```
+
+Ends device__sleep() as if Select was pressed, e.g. for an alarm.
+
+Does nothing while the device is awake.
+
+### Returns
+
+`bruce_result_t`
 
 
 ---
