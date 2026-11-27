@@ -113,8 +113,9 @@ first read, so boot doesn't wait for the chips to start. With an
 `interrupt` pin on the SoC, they go to the chip only after it was active
 (`hal_pin_irq_enable()`, `hal_pin_irq_take()`), while a finger is down or
 key events are left, and once a second in case one was missed. The
-interrupt is level-triggered and masked until taken, so the same pin wakes
-light sleep; `hal_pin_irq_set_hook()` lets Core wake its waiting pollers. Otherwise every read
+keypad's interrupt is level-triggered and masked until taken, so the same
+pin wakes light sleep; touch, which only pulses its line, uses the edge.
+`hal_pin_irq_set_hook()` lets Core wake its waiting pollers. Otherwise every read
 goes to the chip.
 
 ## LEDs

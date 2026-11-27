@@ -39,7 +39,8 @@ static bruce_result_t cst3530__probe(const hal_device_t *device) {
         chip->ready_at = xTaskGetTickCount() + pdMS_TO_TICKS(CST3530_BOOT_MS);
     }
     const hal_pin_t *irq = hal_device_pin(device, "interrupt");
-    if (hal_pin_irq_enable(irq) == BRUCE_OK) chip->irq = irq;
+    /* INT only pulses: on its edge, as LilyGO's driver; too short to wake light sleep reliably. */
+    if (hal_pin_irq_enable(irq, false) == BRUCE_OK) chip->irq = irq;
     device->state->data = chip;
     return BRUCE_OK;
 }

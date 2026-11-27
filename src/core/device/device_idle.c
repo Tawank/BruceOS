@@ -11,9 +11,6 @@
 
 #define TAG "device"
 #define DEVICE__IDLE_CONFIG_MS 1000
-/* The chip stays out of light sleep this long after input, so typing and
- * scrolling never wait on a wake. */
-#define DEVICE__AWAKE_MS 5000
 
 static uint64_t s_started_at;
 static uint64_t s_config_at;
@@ -35,8 +32,7 @@ static void device__idle_asleep(void) {
 
 /* Dims after the dim time without input, and sleeps after the sleep time
  * unless something holds the device awake; then it tries again a sleep
- * time later. In between, the chip may light-sleep a few seconds after the
- * last input when nothing needs it. */
+ * time later. Once dimmed, the chip may light-sleep when nothing needs it. */
 void device__idle_poll(void) {
     uint64_t now = runtime__now();
     if (s_started_at == 0) s_started_at = s_held_at = now;
@@ -61,12 +57,14 @@ void device__idle_poll(void) {
         device__keyboard_light_apply(!dim);
     }
 
-    bool recent = now - active < DEVICE__AWAKE_MS;
-    const char *reason = recent ? NULL : device__awake_reason();
-    device__pm_hold(recent || reason != NULL || device__chip_reason() != NULL);
-
     uint64_t since = active > s_held_at ? active : s_held_at;
-    if (s_sleep_ms == 0 || now - since < s_sleep_ms) return;
+    bool sleep_due = s_sleep_ms != 0 && now - since >= s_sleep_ms;
+    /* Light sleep only once dimmed: touch pulses are too short to wake it. */
+    bool bright = !dim;
+    const char *reason = bright && !sleep_due ? NULL : device__awake_reason();
+    device__pm_hold(bright || reason != NULL || device__chip_reason() != NULL);
+
+    if (!sleep_due) return;
     s_held_at = now;
     if (reason != NULL) return;
     ESP_LOGI(TAG, "idle for %d s: suspending", (int)(s_sleep_ms / 1000));

@@ -140,7 +140,7 @@ bruce_result_t device__wait(device__waiter_t waiter, bool busy, uint32_t busy_ms
     static bool s_select_armed;
     if (waiter == DEVICE__WAITER_INPUT) {
         /* After the input process set the pin up as a button. */
-        if (!s_select_armed) s_select_armed = hal_pin_irq_enable(&s_select) == BRUCE_OK;
+        if (!s_select_armed) s_select_armed = hal_pin_irq_enable(&s_select, true) == BRUCE_OK;
         /* Re-armed only once released, or a held button would wake this at once, over and over. */
         if (!device__pm_select_pressed()) (void)hal_pin_irq_take(&s_select);
     }

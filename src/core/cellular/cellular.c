@@ -1151,7 +1151,7 @@ static bool s_ri_armed;
  * asleep, the UART missed part of it: ask the modem, as after a suspend. */
 static void cellular__ri_check(void) {
     if (!s_ri_armed) {
-        s_ri_armed = hal_pin_irq_enable(&s_ri) == BRUCE_OK;
+        s_ri_armed = hal_pin_irq_enable(&s_ri, true) == BRUCE_OK;
         return;
     }
     if (!hal_pin_irq_take(&s_ri) || device__pm_awake()) return;

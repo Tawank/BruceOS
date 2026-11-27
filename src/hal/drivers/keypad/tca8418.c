@@ -54,7 +54,7 @@ static bruce_result_t tca8418__probe(const hal_device_t *device) {
         (void)hal_pin_set(reset, false);
     }
     const hal_pin_t *irq = hal_device_pin(device, "interrupt");
-    if (hal_pin_irq_enable(irq) == BRUCE_OK) chip->irq = irq;
+    if (hal_pin_irq_enable(irq, true) == BRUCE_OK) chip->irq = irq;
     device->state->data = chip;
     return BRUCE_OK;
 }

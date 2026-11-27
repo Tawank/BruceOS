@@ -541,14 +541,17 @@ progress, which keeps the screen up while it rings or talks.
 light-sleeps the chip whenever every task is waiting, and wakes it for the
 next due delay, wait timeout or `esp_timer`, so any app's `runtime__delay()`
 or `runtime__sleep()` simply ends on time. Core holds an
-`ESP_PM_NO_LIGHT_SLEEP` lock for 5 s after input and while
+`ESP_PM_NO_LIGHT_SLEEP` lock while the screen is lit (not dimmed: the touch
+controller's interrupt only pulses, too briefly to wake light sleep, so a
+dimmed screen notices a touch within a second) and while
 `device__awake_reason()` or `device__chip_reason()` names something (GPS on,
 the CMUX link for mobile data, a Wi-Fi access point). ESP-IDF holds its own
 while a USB host is connected (`USJ_NO_AUTO_LS_ON_CONNECTION`). There's no
 frequency scaling, so APB-clocked peripherals keep their timing.
-- **Waking:** HAL interrupt pins (`hal_pin_irq_enable()`: level-triggered and
-  masked until `hal_pin_irq_take()`, so the same level wakes light sleep)
-  for the keypad, touch, Select and the modem's RI.
+- **Waking:** HAL interrupt pins with `hal_pin_irq_enable(pin, true)`:
+  level-triggered and masked until `hal_pin_irq_take()`, so the same level
+  wakes light sleep; the keypad, Select and the modem's RI. Touch uses its
+  edge (`false`), as LilyGO's driver does, and doesn't wake it.
 - **Pollers:** the input and `device_bus` processes wait in
   `device__wait()` for one of those interrupts (up to a second), and poll
   every 20 ms only while a key, button or finger is down.
