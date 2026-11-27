@@ -219,6 +219,7 @@ idf_component_register(SRCS
                     "hal/drivers/battery/bq27220.c"
                     "hal/drivers/charger/sy6970.c"
                     "core/hid/hid_keyboard.c"
+                    "core/pointer/pointer.c"
                     "core/usb/usb_host.c"
                     "hal/drivers/gpio/xl9555.c"
                     "hal/drivers/haptic/drv2605.c"

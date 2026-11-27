@@ -19,6 +19,12 @@ void display__freeze(bool frozen);
 void display__dim(bool dimmed);
 /* Sleep: the backlight off, or back to its setting. Not saved. */
 void display__light_off(bool off);
+/* Replaces an overlay's pixels (width x height, row by row) for a Core task
+ * without a drawing context; pixels equal to `transparent` show what is
+ * underneath. The caller must own the overlay. */
+bruce_result_t display__overlay_set_image(
+    bruce_display_overlay_id_t overlay, const bruce_display_color_t *pixels, bruce_display_color_t transparent
+);
 
 void display__process_created(bruce_process_id_t process_id, bool gui_requested);
 void display__process_set_gui_requested(bruce_process_id_t process_id);

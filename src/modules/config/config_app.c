@@ -881,7 +881,7 @@ static int config_app__usb_gui(void) {
         bool off = state == BRUCE_USB_HOST_OFF;
         char message[192];
         snprintf(message, sizeof(message), "%s\n%s", config_app__usb_state(state),
-                 off ? "Plug the device in within 15 s of starting."
+                 off ? "Plug the device in within 15 s of starting. The USB console stops until it is unplugged."
                      : "Unplugging the device ends it.");
         const bruce_dialog_choice_t choices[] = {
             {.label = off ? "Start" : "Stop", .value = "toggle"},
@@ -1319,7 +1319,7 @@ int config_app_main(int argc, char **argv) {
     ap_add_optional_arg(mobile, "setting", "data or apn");
     ap_add_optional_arg(mobile, "value", "on/off, or the APN");
     ap_set_helptext(usb, "Show the USB host state.");
-    ap_set_helptext(usb_host, "Power the USB port and take input from a USB device.");
+    ap_set_helptext(usb_host, "Power the USB port and take input from a USB device (keyboards and mice so far).");
     ap_add_optional_arg(usb_host, "state", "on (default) or off");
 
     if (!ap_parse(root, argc, argv)) {

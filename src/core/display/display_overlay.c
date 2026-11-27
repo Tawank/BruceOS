@@ -20,6 +20,7 @@
  * or process's lock, and never across a registry-lock critical section. */
 
 #include "display_internal.h"
+#include "display.h"
 
 #include <string.h>
 
@@ -79,7 +80,14 @@ void display_overlay__compose_row_locked(
         int local_y = screen_y - rect.y;
         const bruce_display_color_t *src =
             &overlay->pixels[(size_t)local_y * (size_t)rect.width + (size_t)(left - rect.x)];
-        memcpy(&row_buffer[left - transfer.x], src, (size_t)(right - left) * sizeof(*row_buffer));
+        bruce_display_color_t *dst = &row_buffer[left - transfer.x];
+        if (!overlay->keyed) {
+            memcpy(dst, src, (size_t)(right - left) * sizeof(*row_buffer));
+            continue;
+        }
+        for (int x = 0; x < right - left; ++x) {
+            if (src[x] != overlay->key) dst[x] = src[x];
+        }
     }
 }
 
@@ -97,9 +105,22 @@ bruce_result_t display_overlay__paint_direct_locked(bruce_display_rect_t clip) {
             int local_y = screen_y - rect.y;
             const bruce_display_color_t *src =
                 &overlay->pixels[(size_t)local_y * (size_t)rect.width + (size_t)(left - rect.x)];
-            bruce_result_t result =
-                display_internal__stream_row_locked((int16_t)left, (int16_t)screen_y, (int16_t)(right - left), src);
-            if (result != BRUCE_OK) return result;
+            /* Keyed: only the runs of opaque pixels, over what the panel shows. */
+            for (int start = 0; start < right - left;) {
+                int end = right - left;
+                if (overlay->keyed) {
+                    while (start < end && src[start] == overlay->key) ++start;
+                    end = start;
+                    while (end < right - left && src[end] != overlay->key) ++end;
+                }
+                if (end > start) {
+                    bruce_result_t result = display_internal__stream_row_locked(
+                        (int16_t)(left + start), (int16_t)screen_y, (int16_t)(end - start), src + start
+                    );
+                    if (result != BRUCE_OK) return result;
+                }
+                start = end;
+            }
         }
     }
     return BRUCE_OK;
@@ -194,6 +215,7 @@ display__overlay_create(int16_t x, int16_t y, int16_t w, int16_t h, bruce_displa
     overlay->rect = (bruce_display_rect_t){x, y, w, h};
     overlay->pixels = pixels;
     overlay->visible = false;
+    overlay->keyed = false;
     overlay->generation++;
     SemaphoreHandle_t surface_lock = overlay->surface.lock;
     memset(&overlay->surface, 0, sizeof(overlay->surface));
@@ -302,6 +324,25 @@ bruce_result_t display__overlay_move(bruce_display_overlay_id_t id, int16_t x, i
     if (overlay->visible) {
         result = display_internal__repaint_rect_locked(display_internal__rect_union(old_rect, overlay->rect));
     }
+    display_internal__unlock_registry();
+    return result;
+}
+
+bruce_result_t display__overlay_set_image(
+    bruce_display_overlay_id_t id, const bruce_display_color_t *pixels, bruce_display_color_t transparent
+) {
+    bruce_process_id_t caller = process__current_id();
+    display_internal__lock_registry();
+    display__overlay_t *overlay = display_overlay__find_locked(id);
+    if (overlay == NULL || overlay->owner != caller) {
+        display_internal__unlock_registry();
+        return overlay == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    }
+    memcpy(overlay->pixels, pixels, (size_t)overlay->rect.width * overlay->rect.height * sizeof(*pixels));
+    overlay->keyed = true;
+    overlay->key = transparent;
+    overlay->generation++;
+    bruce_result_t result = overlay->visible ? display_internal__repaint_rect_locked(overlay->rect) : BRUCE_OK;
     display_internal__unlock_registry();
     return result;
 }

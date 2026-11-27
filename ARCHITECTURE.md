@@ -1178,7 +1178,7 @@ only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
 
 `device__usb_host_start()` (`core/usb/usb_host.c`; Config > USB Host,
 `config usb host [on|off]`) turns the USB port into a host for one input
-device; boot-protocol keyboards are the only class taken so far. It needs a charger chip that can power the port (`hal_charger_set_otg()`:
+device; boot-protocol keyboards and mice are the classes taken so far. It needs a charger chip that can power the port (`hal_charger_set_otg()`:
 the SY6970's boost, which the T-Deck MAX enables with its OTG pin pulled high)
 and refuses with `BRUCE_ERR_BUSY` while a computer or charger is plugged in:
 the SY6970 leaves its boost only above 6 V, so it would push 5 V against them.
@@ -1188,6 +1188,16 @@ the SY6970 leaves its boost only above 6 V, so it would push 5 V against them.
   its interrupt endpoint. Reports go through `core/hid/hid_keyboard.c`, the
   same translation Bluetooth keyboards use (each keyboard with its own keys
   down), into `input__inject()`.
+- **Mouse** (`core/pointer/pointer.c`): a mouse is a finger. The left button
+  is a touch where the pointer is (press, drag, release), so every app that
+  takes touch takes the mouse with no change; right is Back, middle Select,
+  the wheel Up/Down. Moving it counts as input for dimming. The pointer is an
+  8x12 arrow in a Core-owned overlay with a see-through colour
+  (`display__overlay_set_image()`: overlays skip pixels of their key colour
+  when they are composed). To stay cheap, reports only add up the movement:
+  the overlay moves, and a drag is sent, at most every 30 ms (150 ms on
+  e-paper, where each move is a partial refresh), repainting just the old
+  and new 8x12 boxes, and the pointer hides after 3 s still.
 - **End:** the device unplugged, none within 15 s, or
   `device__usb_host_stop()`. The task frees the host library, gives the pins
   back to the console (`usb_new_phy()` with `USB_PHY_CTRL_SERIAL_JTAG`; the

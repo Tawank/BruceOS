@@ -107,6 +107,8 @@ typedef struct display__overlay_s {
     bool visible;
     bruce_display_rect_t rect;      /* on-screen position and size */
     bruce_display_color_t *pixels;  /* rect.width * rect.height, private */
+    bool keyed;                     /* Pixels equal to `key` show what is underneath. */
+    bruce_display_color_t key;
     display__process_context_t surface; /* cursor/text state + draw target */
 } display__overlay_t;
 

@@ -7,23 +7,23 @@
 #include <string.h>
 
 #include "core/hid/hid_keyboard.h"
+#include "core/pointer/pointer.h"
 #include "esp_intr_alloc.h"
-#include "esp_log.h"
 #include "esp_private/usb_phy.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/hal_charger.h"
 #include "usb/usb_host.h"
 
-#define TAG "usb_host"
 #define USB_HOST__WAIT_MS 15000
 #define USB_HOST__STEP_MS 10
 #define USB_HOST__CONTROL_MS 500
 #define USB_HOST__STACK 4096
-/* HID class: boot keyboard interface, SET_PROTOCOL to the boot protocol. */
+/* HID class: boot keyboard and mouse interfaces, SET_PROTOCOL to the boot protocol. */
 #define USB_HOST__HID_CLASS 0x03
 #define USB_HOST__HID_BOOT 0x01
 #define USB_HOST__HID_KEYBOARD 0x01
+#define USB_HOST__HID_MOUSE 0x02
 #define USB_HOST__HID_SET_PROTOCOL 0x0B
 
 typedef struct {
@@ -32,6 +32,7 @@ typedef struct {
     uint8_t new_address; /* 0: none waiting to be opened. */
     bool gone;
     uint8_t interface;
+    uint8_t protocol; /* USB_HOST__HID_KEYBOARD or USB_HOST__HID_MOUSE. */
     bool claimed;
     uint8_t endpoint;
     usb_transfer_t *in;
@@ -44,7 +45,6 @@ static volatile bruce_usb_host_state_t s_state = BRUCE_USB_HOST_OFF;
 static volatile bool s_stop;
 static usb_phy_handle_t s_console_phy; /* The port given back to the USB serial console. */
 static usb_host__session_t s_session;
-
 static void usb_host__pump(usb_host__session_t *session) {
     uint32_t flags = 0;
     (void)usb_host_lib_handle_events(pdMS_TO_TICKS(USB_HOST__STEP_MS), &flags);
@@ -64,7 +64,14 @@ static void usb_host__report(usb_transfer_t *transfer) {
     usb_host__session_t *session = transfer->context;
     session->in_busy = false;
     if (transfer->status != USB_TRANSFER_STATUS_COMPLETED || session->gone || s_stop) return;
-    if (transfer->actual_num_bytes >= 8) (void)hid_keyboard__report(&session->keys, transfer->data_buffer, 8);
+    const uint8_t *data = transfer->data_buffer;
+    int length = transfer->actual_num_bytes;
+    if (session->protocol == USB_HOST__HID_KEYBOARD && length >= 8) {
+        (void)hid_keyboard__report(&session->keys, data, 8);
+    } else if (session->protocol == USB_HOST__HID_MOUSE && length >= 3) {
+        /* Boot mouse: buttons, x, y; most add the wheel. */
+        pointer__report(data[0], (int8_t)data[1], (int8_t)data[2], length >= 4 ? (int8_t)data[3] : 0);
+    }
     session->in_busy = usb_host_transfer_submit(transfer) == ESP_OK;
 }
 
@@ -72,10 +79,11 @@ static void usb_host__control_done(usb_transfer_t *transfer) {
     ((usb_host__session_t *)transfer->context)->control_done = true;
 }
 
-/* A boot keyboard answers in boot reports (8 bytes) only once asked to. */
-static bool usb_host__set_boot_protocol(usb_host__session_t *session) {
+/* Boot devices send boot reports only once asked to. One that refuses may
+ * still send boot-like reports, so the answer doesn't matter. */
+static void usb_host__set_boot_protocol(usb_host__session_t *session) {
     usb_transfer_t *control = NULL;
-    if (usb_host_transfer_alloc(USB_SETUP_PACKET_SIZE, 0, &control) != ESP_OK) return false;
+    if (usb_host_transfer_alloc(USB_SETUP_PACKET_SIZE, 0, &control) != ESP_OK) return;
     usb_setup_packet_t *setup = (usb_setup_packet_t *)control->data_buffer;
     setup->bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
     setup->bRequest = USB_HOST__HID_SET_PROTOCOL;
@@ -92,20 +100,20 @@ static bool usb_host__set_boot_protocol(usb_host__session_t *session) {
     for (int waited = 0; sent && !session->control_done && waited < USB_HOST__CONTROL_MS; waited += 2 * USB_HOST__STEP_MS) {
         usb_host__pump(session);
     }
-    bool ok = sent && session->control_done && control->status == USB_TRANSFER_STATUS_COMPLETED;
     if (session->control_done || !sent) (void)usb_host_transfer_free(control);
-    return ok;
 }
 
-/* The device's boot keyboard interface and its interrupt IN endpoint. */
-static const usb_ep_desc_t *usb_host__find_keyboard(const usb_config_desc_t *config, uint8_t *out_interface) {
+/* The device's first boot keyboard or mouse interface and its interrupt IN endpoint. */
+static const usb_ep_desc_t *usb_host__find_input(const usb_config_desc_t *config, uint8_t *out_interface,
+                                                 uint8_t *out_protocol) {
     int offset = 0;
     const usb_standard_desc_t *descriptor = (const usb_standard_desc_t *)config;
     while ((descriptor = usb_parse_next_descriptor_of_type(descriptor, config->wTotalLength,
                                                            USB_B_DESCRIPTOR_TYPE_INTERFACE, &offset)) != NULL) {
         const usb_intf_desc_t *interface = (const usb_intf_desc_t *)descriptor;
         if (interface->bInterfaceClass != USB_HOST__HID_CLASS || interface->bInterfaceSubClass != USB_HOST__HID_BOOT ||
-            interface->bInterfaceProtocol != USB_HOST__HID_KEYBOARD) {
+            (interface->bInterfaceProtocol != USB_HOST__HID_KEYBOARD &&
+             interface->bInterfaceProtocol != USB_HOST__HID_MOUSE)) {
             continue;
         }
         for (int i = 0; i < interface->bNumEndpoints; ++i) {
@@ -115,6 +123,7 @@ static const usb_ep_desc_t *usb_host__find_keyboard(const usb_config_desc_t *con
             if (endpoint != NULL && USB_EP_DESC_GET_EP_DIR(endpoint) &&
                 USB_EP_DESC_GET_XFERTYPE(endpoint) == USB_TRANSFER_TYPE_INTR) {
                 *out_interface = interface->bInterfaceNumber;
+                *out_protocol = interface->bInterfaceProtocol;
                 return endpoint;
             }
         }
@@ -140,10 +149,12 @@ static void usb_host__close(usb_host__session_t *session) {
     session->claimed = false;
     (void)usb_host_device_close(session->client, session->device);
     session->device = NULL;
-    hid_keyboard__release_all(&session->keys);
+    if (session->protocol == USB_HOST__HID_KEYBOARD) hid_keyboard__release_all(&session->keys);
+    if (session->protocol == USB_HOST__HID_MOUSE) pointer__end();
+    session->protocol = 0;
 }
 
-/* Opens a new device; keeps it only if it is a boot keyboard. */
+/* Opens a new device; keeps it only if it is a boot keyboard or mouse. */
 static void usb_host__open(usb_host__session_t *session, uint8_t address) {
     if (usb_host_device_open(session->client, address, &session->device) != ESP_OK) {
         session->device = NULL;
@@ -152,19 +163,17 @@ static void usb_host__open(usb_host__session_t *session, uint8_t address) {
     const usb_config_desc_t *config = NULL;
     const usb_ep_desc_t *endpoint = NULL;
     if (usb_host_get_active_config_descriptor(session->device, &config) == ESP_OK) {
-        endpoint = usb_host__find_keyboard(config, &session->interface);
+        endpoint = usb_host__find_input(config, &session->interface, &session->protocol);
     }
     if (endpoint == NULL) {
-        ESP_LOGW(TAG, "device %u is not a keyboard", address);
         usb_host__close(session);
         return;
     }
     session->endpoint = endpoint->bEndpointAddress;
     int size = USB_EP_DESC_GET_MPS(endpoint);
     session->claimed = usb_host_interface_claim(session->client, session->device, session->interface, 0) == ESP_OK;
-    if (!session->claimed || !usb_host__set_boot_protocol(session) ||
-        usb_host_transfer_alloc(size, 0, &session->in) != ESP_OK) {
-        ESP_LOGW(TAG, "keyboard %u did not start", address);
+    if (session->claimed) usb_host__set_boot_protocol(session);
+    if (!session->claimed || usb_host_transfer_alloc(size, 0, &session->in) != ESP_OK) {
         usb_host__close(session);
         return;
     }
@@ -179,15 +188,15 @@ static void usb_host__open(usb_host__session_t *session, uint8_t address) {
         return;
     }
     s_state = BRUCE_USB_HOST_CONNECTED;
-    ESP_LOGI(TAG, "keyboard connected");
 }
 
 /* Until the device is unplugged, none comes within USB_HOST__WAIT_MS, or a stop.
- * Boot keyboards are the only devices taken so far. */
+ * Boot keyboards and mice are the devices taken so far. */
 static void usb_host__serve(usb_host__session_t *session) {
     TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(USB_HOST__WAIT_MS);
     while (!s_stop && !session->gone) {
         usb_host__pump(session);
+        if (session->protocol == USB_HOST__HID_MOUSE) pointer__poll();
         if (session->new_address != 0) {
             uint8_t address = session->new_address;
             session->new_address = 0;
@@ -220,15 +229,12 @@ static void usb_host__task(void *context) {
                 if (flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) break;
             }
         }
-        if (usb_host_uninstall() != ESP_OK) ESP_LOGE(TAG, "USB host did not uninstall");
-    } else {
-        ESP_LOGE(TAG, "USB host did not install");
+        (void)usb_host_uninstall();
     }
     /* The port back to the USB serial console. */
     const usb_phy_config_t console = {.controller = USB_PHY_CTRL_SERIAL_JTAG, .target = USB_PHY_TARGET_INT};
-    if (usb_new_phy(&console, &s_console_phy) != ESP_OK) ESP_LOGE(TAG, "USB console did not come back");
+    if (usb_new_phy(&console, &s_console_phy) != ESP_OK) s_console_phy = NULL;
     (void)hal_charger_set_otg(charger, false);
-    ESP_LOGI(TAG, "USB port back to the console");
     s_state = BRUCE_USB_HOST_OFF;
     vTaskDelete(NULL);
 }
@@ -251,7 +257,6 @@ bruce_result_t device__usb_host_start(void) {
         s_state = BRUCE_USB_HOST_OFF;
         return BRUCE_ERR_NO_MEMORY;
     }
-    ESP_LOGI(TAG, "USB port powered, waiting for a device");
     return BRUCE_OK;
 }
 

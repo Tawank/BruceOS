@@ -7480,7 +7480,8 @@ bruce_result_t device__usb_host_start(void);
 
 Powers the USB port from the battery and takes input from a USB device.
 
-Supported so far: boot-protocol keyboards. The port stops being the USB
+Supported so far: boot-protocol keyboards and mice (a mouse moves an on-screen
+pointer and its left button touches where it points). The port stops being the USB
 serial console. It goes back, and the power off, when the device is
 unplugged, when none is plugged in within 15 s, or on device__usb_host_stop().
 
