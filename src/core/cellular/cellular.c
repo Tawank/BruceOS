@@ -1489,7 +1489,7 @@ static void cellular__update_status_icon(void) {
         "signal-cellular-1",
         "signal-cellular-2",
         "signal-cellular-3",
-        "signal-cellular-3",
+        "signal-cellular-4",
     };
     static char s_shown[24];
     char icon[24] = "";
