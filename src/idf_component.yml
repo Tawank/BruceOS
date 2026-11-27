@@ -28,3 +28,8 @@ dependencies:
   # Touch controller driver for boards with BRUCE_TOUCH_ENABLED (e.g.
   # m5stack-cores3's FT6336U, which is FT5x06-register-compatible).
   espressif/esp_lcd_touch_ft5x06: ^1.0.7
+  # USB host for keyboards (core/usb/usb_host.c), on targets with USB OTG.
+  espressif/usb:
+    version: ^1.6.0
+    rules:
+      - if: target in [esp32s2, esp32s3, esp32p4]

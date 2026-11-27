@@ -106,7 +106,9 @@ T-Deck MAX) and measures with the battery level every 5 s. It then decides
 `device__is_charging()` (a usable input, not OTG) instead of the gauge, and
 `device__get_power()` returns the whole reading. The SY6970 driver writes only REG02's one-shot
 measurement bit, and only while something is plugged in, so the chip
-keeps its default charge settings.
+keeps its default charge settings. Its optional `set_otg` powers the USB
+port from the battery (`hal_charger_set_otg()`, for USB host); while
+on, the driver resets the chip's I2C watchdog on every read.
 
 ## Input
 

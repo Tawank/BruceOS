@@ -6,3 +6,9 @@ bruce_result_t hal_charger_read(const hal_device_t *device, bool measure, bruce_
     const hal_charger_api_t *api = device->driver->api;
     return api->read(device, measure, out);
 }
+
+bruce_result_t hal_charger_set_otg(const hal_device_t *device, bool on) {
+    if (!hal_device_ready(device) || device->driver->class_id != HAL_CLASS_CHARGER) return BRUCE_ERR_NOT_FOUND;
+    const hal_charger_api_t *api = device->driver->api;
+    return api->set_otg != NULL ? api->set_otg(device, on) : BRUCE_ERR_UNSUPPORTED;
+}

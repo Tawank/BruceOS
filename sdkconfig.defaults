@@ -32,6 +32,10 @@ CONFIG_I2C_ISR_IRAM_SAFE=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 
+# ESP-IDF's common roots (40 of 145, about 99% of sites by its count): 18 KB
+# instead of 69 KB. They cover Let's Encrypt, Sectigo/USERTrust (GitHub),
+# GlobalSign R3 (OSM tiles), DigiCert, Amazon and Google.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 # Append roots ESP-IDF's default bundle lacks: the legacy GlobalSign Root CA
 # (R1) and Let's Encrypt's ISRG Root YE/YR - see certs/extra_roots.pem.
 CONFIG_MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE=y

@@ -7,11 +7,14 @@
 
 /* Registers from Silergy's AN_SY6970 (Rev 0.1). */
 #define SY6970_REG_ADC 0x02    /* Bit 7 CONV_START: one measurement, done within 1 s. */
+#define SY6970_REG_CONTROL 0x03 /* Bit 6 WD_RST, bit 5 OTG_CONFIG (boost, with the OTG pin high). */
 #define SY6970_REG_STATUS 0x0B /* 7:5 BUS_STAT, 4:3 CHRG_STAT, 2 PG_STAT. */
 #define SY6970_REG_VBUS 0x11   /* 6:0 BUSV: 2.6 V + 100 mV steps. */
 #define SY6970_REG_ICHG 0x12   /* 6:0 ICHGR: 50 mA steps. */
 #define SY6970_REG_PART 0x14   /* 5:3 PN, 001. */
 #define SY6970_CONV_START 0x80
+#define SY6970_WD_RST 0x40
+#define SY6970_OTG_CONFIG 0x20
 #define SY6970_PN 1
 #define SY6970_SPEED_HZ 400000
 #define SY6970_TIMEOUT_MS 100
@@ -19,6 +22,7 @@
 typedef struct {
     i2c_master_dev_handle_t i2c;
     bool measuring; /* A measurement was started while something was plugged in. */
+    bool otg;
     int32_t input_mv;
     int32_t charge_ma;
 } sy6970_t;
@@ -55,6 +59,12 @@ static const bruce_charge_state_t s_charges[4] = {
     BRUCE_CHARGE_NOT_CHARGING, BRUCE_CHARGE_PRECHARGE, BRUCE_CHARGE_CHARGING, BRUCE_CHARGE_FULL,
 };
 
+/* Sets or clears bits of a register, keeping the rest. */
+static bool sy6970__update(i2c_master_dev_handle_t i2c, uint8_t reg, uint8_t mask, uint8_t bits) {
+    uint8_t value = 0;
+    return sy6970__read(i2c, reg, &value) && sy6970__write(i2c, reg, (uint8_t)((value & ~mask) | bits));
+}
+
 /* With something plugged in, `measure` takes in the last measurement and
  * starts the next (within 1 s); nothing is written while on battery. */
 static bruce_result_t sy6970__read_power(const hal_device_t *device, bool measure, bruce_device_power_t *out) {
@@ -79,6 +89,22 @@ static bruce_result_t sy6970__read_power(const hal_device_t *device, bool measur
     }
     out->input_mv = chip->input_mv;
     out->charge_ma = chip->charge_ma;
+    /* Writing made the chip the host's: its I2C watchdog (40 s) would put
+     * the defaults back, boost off, unless reset. A hung Bruce lets it. */
+    if (chip->otg) (void)sy6970__update(chip->i2c, SY6970_REG_CONTROL, SY6970_WD_RST, SY6970_WD_RST);
+    return BRUCE_OK;
+}
+
+/* The board ties the OTG pin high (LilyGO T-Deck MAX), so OTG_CONFIG alone
+ * switches the boost. The chip drops it itself on a fault (overload, a
+ * low battery, overheating) or above 6 V on the port. */
+static bruce_result_t sy6970__set_otg(const hal_device_t *device, bool on) {
+    sy6970_t *chip = device->state->data;
+    if (!sy6970__update(chip->i2c, SY6970_REG_CONTROL, SY6970_OTG_CONFIG | SY6970_WD_RST,
+                        on ? SY6970_OTG_CONFIG | SY6970_WD_RST : SY6970_WD_RST)) {
+        return BRUCE_ERR_IO;
+    }
+    chip->otg = on;
     return BRUCE_OK;
 }
 
@@ -95,7 +121,7 @@ static void sy6970__describe(const hal_device_t *device, char *out, size_t size)
              charges[power.charge]);
 }
 
-static const hal_charger_api_t sy6970__api = {.read = sy6970__read_power};
+static const hal_charger_api_t sy6970__api = {.read = sy6970__read_power, .set_otg = sy6970__set_otg};
 
 const hal_driver_t sy6970_driver = {
     .name = "sy6970",

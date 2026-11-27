@@ -90,5 +90,6 @@ const char *device__chip_reason(void) {
     if (gps__is_on()) return "gps";
     if (cellular__mux_running()) return "mobile data";
     if (wifi__is_ap_running()) return "wifi ap"; /* Clients would wait out every sleep. */
+    if (device__usb_host_state() != BRUCE_USB_HOST_OFF) return "usb host";
     return NULL;
 }

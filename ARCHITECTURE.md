@@ -1174,6 +1174,29 @@ the public input vocabulary. Descriptor-specific report layouts that do not
 match that common format are not guessed. All accepted HID reports enter Bruce
 only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
 
+## USB host
+
+`device__usb_host_start()` (`core/usb/usb_host.c`; Config > USB Host,
+`config usb host [on|off]`) turns the USB port into a host for one input
+device; boot-protocol keyboards are the only class taken so far. It needs a charger chip that can power the port (`hal_charger_set_otg()`:
+the SY6970's boost, which the T-Deck MAX enables with its OTG pin pulled high)
+and refuses with `BRUCE_ERR_BUSY` while a computer or charger is plugged in:
+the SY6970 leaves its boost only above 6 V, so it would push 5 V against them.
+- **Session:** a task installs ESP-IDF's USB host library (`espressif/usb`),
+  which moves the ESP32-S3's USB pins from the USB serial console to USB OTG,
+  claims the keyboard's boot interface, asks for the boot protocol and reads
+  its interrupt endpoint. Reports go through `core/hid/hid_keyboard.c`, the
+  same translation Bluetooth keyboards use (each keyboard with its own keys
+  down), into `input__inject()`.
+- **End:** the device unplugged, none within 15 s, or
+  `device__usb_host_stop()`. The task frees the host library, gives the pins
+  back to the console (`usb_new_phy()` with `USB_PHY_CTRL_SERIAL_JTAG`; the
+  library's uninstall doesn't) and turns the boost off. Nothing checks for a
+  device otherwise, so the battery only powers the port when asked.
+- **Power:** the chip doesn't light-sleep during a session (`device__chip_reason()`
+  "usb host"). While boosting, the 1 s charger poll resets the SY6970's
+  40 s I2C watchdog; if Bruce hangs, the chip goes back to its defaults, boost off.
+
 ## Input, display, storage, and Config
 
 Core owns the normalized event loop and initializes it before starting apps.

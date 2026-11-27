@@ -218,6 +218,8 @@ idf_component_register(SRCS
                     "hal/hal_touch.c"
                     "hal/drivers/battery/bq27220.c"
                     "hal/drivers/charger/sy6970.c"
+                    "core/hid/hid_keyboard.c"
+                    "core/usb/usb_host.c"
                     "hal/drivers/gpio/xl9555.c"
                     "hal/drivers/haptic/drv2605.c"
                     "hal/drivers/imu/bhi260ap.c"
@@ -372,6 +374,11 @@ idf_component_register(SRCS
                     "."
                       PRIV_INCLUDE_DIRS
                       ".")
+
+# USB host (core/usb/usb_host.c) on targets with USB OTG.
+if(CONFIG_SOC_USB_OTG_SUPPORTED)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE idf::espressif__usb)
+endif()
 
 # The board's HAL devices (src/hal/hal.h): boards/<id>/board.c, or none.
 set(bruce_board_id "${CONFIG_BRUCE_BOARD_ID}")

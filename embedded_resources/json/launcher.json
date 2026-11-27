@@ -40,6 +40,7 @@
     "LED Config": "config led",
     "Audio Config": "config audio",
     "Mobile Data": "config mobile",
+    "USB Host": "config usb host",
     "System Config": {
       "$INSTANT_BOOT_TEXT": "BG=1 config system instant-boot toggle",
       "$WIFI_STARTUP_TEXT": "BG=1 config system wifi-startup toggle",

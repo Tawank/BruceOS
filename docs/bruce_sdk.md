@@ -7459,6 +7459,69 @@ with the battery level (every 5 s), only while something is plugged in.
 
 ---
 
+## bruce_usb_host_state_t()
+
+```c
+typedef enum {
+    BRUCE_USB_HOST_OFF,      /**< The port is the USB serial console. */
+    BRUCE_USB_HOST_WAITING,   /**< Powering the port, waiting for a device. */
+    BRUCE_USB_HOST_CONNECTED, /**< A supported device is plugged in and feeds input. */
+} bruce_usb_host_state_t;
+```
+
+
+---
+
+## device__usb_host_start()
+
+```c
+bruce_result_t device__usb_host_start(void);
+```
+
+Powers the USB port from the battery and takes input from a USB device.
+
+Supported so far: boot-protocol keyboards. The port stops being the USB
+serial console. It goes back, and the power off, when the device is
+unplugged, when none is plugged in within 15 s, or on device__usb_host_stop().
+
+@return BRUCE_ERR_BUSY while a computer or charger is plugged in;
+        BRUCE_ERR_UNSUPPORTED on boards that can't power the port.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## device__usb_host_stop()
+
+```c
+bruce_result_t device__usb_host_stop(void);
+```
+
+Ends device__usb_host_start() at once.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## device__usb_host_state()
+
+```c
+bruce_usb_host_state_t device__usb_host_state(void);
+```
+
+### Returns
+
+`bruce_usb_host_state_t`
+
+
+---
+
 ## device__restart()
 
 ```c

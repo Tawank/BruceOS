@@ -861,6 +861,63 @@ static int config_app__mobile_gui(void) {
     }
 }
 
+static const char *config_app__usb_state(bruce_usb_host_state_t state) {
+    switch (state) {
+        case BRUCE_USB_HOST_WAITING: return "powering the port, waiting for a device";
+        case BRUCE_USB_HOST_CONNECTED: return "device connected";
+        default: return "off (USB console)";
+    }
+}
+
+static const char *config_app__usb_start_error(bruce_result_t result) {
+    if (result == BRUCE_ERR_BUSY) return "Unplug the computer or charger first";
+    if (result == BRUCE_ERR_UNSUPPORTED) return "This device can't power its USB port";
+    return result__to_string(result);
+}
+
+static int config_app__usb_gui(void) {
+    for (;;) {
+        bruce_usb_host_state_t state = device__usb_host_state();
+        bool off = state == BRUCE_USB_HOST_OFF;
+        char message[192];
+        snprintf(message, sizeof(message), "%s\n%s", config_app__usb_state(state),
+                 off ? "Plug the device in within 15 s of starting."
+                     : "Unplugging the device ends it.");
+        const bruce_dialog_choice_t choices[] = {
+            {.label = off ? "Start" : "Stop", .value = "toggle"},
+            {.label = "Back",                 .value = "back"  },
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice_launcher("USB host", message, choices, 2, &selected);
+        if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == 1)) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        if (!off) {
+            (void)device__usb_host_stop();
+            continue;
+        }
+        result = device__usb_host_start();
+        if (result != BRUCE_OK) dialog__message(BRUCE_DIALOG_ERROR, "USB host", config_app__usb_start_error(result));
+    }
+}
+
+/* "config usb": the state; "config usb host [on|off]": start or stop it. */
+static int config_app__usb_cli(ArgParser *usb, ArgParser *usb_host) {
+    if (ap_get_cmd_parser(usb) != usb_host) {
+        stdio__printf("USB host: %s\n", config_app__usb_state(device__usb_host_state()));
+        return BRUCE_OK;
+    }
+    const char *state = ap_get_arg(usb_host, "state");
+    if (state != NULL && strcmp(state, "off") == 0) return device__usb_host_stop();
+    if (state != NULL && strcmp(state, "on") != 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_result_t result = device__usb_host_start();
+    if (result != BRUCE_OK) {
+        stdio__printf("USB host: %s\n", config_app__usb_start_error(result));
+        return result;
+    }
+    stdio__printf("USB host: plug the device in within 15 s; the USB console stops until it is unplugged\n");
+    return BRUCE_OK;
+}
+
 /* "config mobile", "config mobile data on|off", "config mobile apn <name>". */
 static int config_app__mobile_cli(ArgParser *mobile) {
     if (!cellular__is_available()) {
@@ -1144,6 +1201,8 @@ int config_app_main(int argc, char **argv) {
     ArgParser *audio_enabled = audio != NULL ? ap_new_cmd(audio, "enabled") : NULL;
     ArgParser *audio_volume = audio != NULL ? ap_new_cmd(audio, "volume") : NULL;
     ArgParser *mobile = ap_new_cmd(root, "mobile");
+    ArgParser *usb = ap_new_cmd(root, "usb");
+    ArgParser *usb_host = usb != NULL ? ap_new_cmd(usb, "host") : NULL;
     ArgParser *parsers[] = {
         system,
         clock,
@@ -1181,6 +1240,8 @@ int config_app_main(int argc, char **argv) {
         audio_enabled,
         audio_volume,
         mobile,
+        usb,
+        usb_host,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -1257,6 +1318,9 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(mobile, "Mobile data: data on|off, apn <name> (none: automatic).");
     ap_add_optional_arg(mobile, "setting", "data or apn");
     ap_add_optional_arg(mobile, "value", "on/off, or the APN");
+    ap_set_helptext(usb, "Show the USB host state.");
+    ap_set_helptext(usb_host, "Power the USB port and take input from a USB device.");
+    ap_add_optional_arg(usb_host, "state", "on (default) or off");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -1274,6 +1338,7 @@ int config_app_main(int argc, char **argv) {
     bool theme_hierarchy = root_action == theme;
     bool audio_hierarchy = root_action == audio;
     bool mobile_hierarchy = root_action == mobile;
+    bool usb_hierarchy = root_action == usb;
     bool gui = runtime__is_gui_requested();
     int result;
     if (clock_hierarchy) {
@@ -1286,6 +1351,8 @@ int config_app_main(int argc, char **argv) {
         result = gui ? config_app__instant_boot_gui() : config_app__instant_boot_cli(instant_boot, instant_boot_toggle);
     } else if (wifi_startup_hierarchy) {
         result = gui ? config_app__wifi_startup_gui() : config_app__wifi_startup_cli(wifi_startup, wifi_startup_toggle);
+    } else if (usb_hierarchy) {
+        result = gui ? config_app__usb_gui() : config_app__usb_cli(usb, usb_host);
     } else if (mobile_hierarchy) {
         result = gui ? config_app__mobile_gui() : config_app__mobile_cli(mobile);
     } else if (audio_hierarchy) {
