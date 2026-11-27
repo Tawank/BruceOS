@@ -25,6 +25,7 @@ typedef struct {
     uint8_t pending; /* Events left of the count last read. */
     const hal_pin_t *irq;
     TickType_t checked_at;
+    bool draining; /* Events were read: look again until the FIFO is empty and INT cleared. */
 } tca8418_t;
 
 static bool tca8418__write(tca8418_t *chip, uint8_t reg, uint8_t value) {
@@ -85,24 +86,32 @@ static bruce_result_t tca8418__next_event(const hal_device_t *device, hal_keypad
         chip->configured = true;
     }
     if (chip->pending == 0) {
-        /* Only on an interrupt; with no interrupt pin, every call. */
+        /* Only on an interrupt or while draining; with no interrupt pin, every call. */
         TickType_t now = xTaskGetTickCount();
-        if (chip->irq != NULL && !hal_pin_irq_take(chip->irq) &&
+        if (chip->irq != NULL && !chip->draining && !hal_pin_irq_take(chip->irq) &&
             now - chip->checked_at < pdMS_TO_TICKS(TCA8418_CHECK_MS)) {
             return BRUCE_ERR_NOT_FOUND;
         }
-        /* Cleared before the count is read: a key after this raises INT again. */
-        if (!tca8418__write(chip, TCA8418_INT_STAT, 0x01)) return BRUCE_ERR_IO;
         uint8_t count = 0;
         if (!tca8418__read(chip, TCA8418_KEY_LCK_EC, &count)) return BRUCE_ERR_IO;
         chip->checked_at = now;
         chip->pending = count & 0x0F;
-        if (chip->pending == 0) return BRUCE_ERR_NOT_FOUND;
+        if (chip->pending == 0) {
+            /* TI's order: K_INT and INT clear only once the FIFO is empty; a
+             * key that came meanwhile is counted again after the clear. */
+            if (!tca8418__write(chip, TCA8418_INT_STAT, 0x01) ||
+                !tca8418__read(chip, TCA8418_KEY_LCK_EC, &count)) {
+                return BRUCE_ERR_IO;
+            }
+            chip->pending = count & 0x0F;
+            chip->draining = chip->pending > 0;
+            if (chip->pending == 0) return BRUCE_ERR_NOT_FOUND;
+        }
+        chip->draining = true;
     }
     uint8_t event = 0;
     if (!tca8418__read(chip, TCA8418_KEY_EVENT_A, &event) || (event & 0x7F) == 0) {
         chip->pending = 0;
-        chip->checked_at -= pdMS_TO_TICKS(TCA8418_CHECK_MS); /* Looks again next call. */
         return BRUCE_ERR_NOT_FOUND;
     }
     chip->pending--;

@@ -66,29 +66,6 @@ bruce_result_t hal_pin_irq_enable(const hal_pin_t *pin) {
                : BRUCE_ERR_IO;
 }
 
-static bool hal_gpio__irq_enabled(const hal_pin_t *pin) {
-    return pin != NULL && pin->controller == NULL && pin->number < GPIO_NUM_MAX;
-}
-
-/* The wake level replaces the edge interrupt while asleep; the interrupt
- * is masked so that level can't hold the CPU in the handler after waking. */
-bruce_result_t hal_pin_wake(const hal_pin_t *pin, bool on) {
-    if (!hal_gpio__irq_enabled(pin)) return BRUCE_ERR_UNSUPPORTED;
-    gpio_num_t gpio = (gpio_num_t)pin->number;
-    bool active_low = (pin->flags & HAL_PIN_ACTIVE_LOW) != 0;
-    if (on) {
-        gpio_intr_disable(gpio);
-        return gpio_wakeup_enable(gpio, active_low ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL) == ESP_OK
-                   ? BRUCE_OK
-                   : BRUCE_ERR_IO;
-    }
-    gpio_wakeup_disable(gpio);
-    gpio_set_intr_type(gpio, active_low ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE);
-    s_irq_fired[pin->number] = true;
-    gpio_intr_enable(gpio);
-    return BRUCE_OK;
-}
-
 bool hal_pin_irq_take(const hal_pin_t *pin) {
     if (pin == NULL || pin->controller != NULL || pin->number >= GPIO_NUM_MAX || !s_irq_fired[pin->number]) return false;
     s_irq_fired[pin->number] = false;

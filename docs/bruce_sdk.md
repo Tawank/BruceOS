@@ -7441,7 +7441,7 @@ without a latch enter deep sleep directly.
 bruce_result_t device__sleep(void);
 ```
 
-Light-sleeps the whole device until Select or a key is pressed.
+Light-sleeps the whole device until the Select button is pressed.
 
 Blocks until wake-up. Everything pauses meanwhile and the backlight is
 off; an e-paper panel keeps showing what it shows now (drawing still in

@@ -20,6 +20,3 @@ bruce_result_t hal_pin_irq_enable(const hal_pin_t *pin);
 /* Whether an active edge came since the last call. Read the chip after
  * this, so an edge during the read is not lost. */
 bool hal_pin_irq_take(const hal_pin_t *pin);
-/* Light sleep wakes while a pin from hal_pin_irq_enable() is active (on),
- * or not (off, after waking: its edge interrupt is back and marked fired). */
-bruce_result_t hal_pin_wake(const hal_pin_t *pin, bool on);

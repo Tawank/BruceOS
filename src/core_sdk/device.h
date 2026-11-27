@@ -46,7 +46,7 @@ bruce_result_t device__restart(uint32_t delay_ms);
 bruce_result_t device__power_off(uint32_t delay_ms);
 
 /**
- * @brief Light-sleeps the whole device until Select or a key is pressed.
+ * @brief Light-sleeps the whole device until the Select button is pressed.
  *
  * Blocks until wake-up. Everything pauses meanwhile and the backlight is
  * off; an e-paper panel keeps showing what it shows now (drawing still in

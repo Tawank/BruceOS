@@ -537,10 +537,8 @@ progress, which keeps the screen up while it rings or talks.
   sleep time after it was last held.
 
 `device__sleep()` (`suspend`, the system menu's Sleep) is a manual light
-sleep: everything stops until Select, a key (the keypad's HAL `interrupt`
-pin, held active while key events wait; `hal_pin_wake()` swaps its edge
-interrupt for a level wake and back) or the modem's RI. Timers don't fire
-meanwhile. The backlight goes off and back without being saved.
+sleep: everything stops until Select or the modem's RI. Keys and touch
+don't wake it, so it isn't woken by accident. Timers don't fire meanwhile. The backlight goes off and back without being saved.
 
 ### Cellular
 
