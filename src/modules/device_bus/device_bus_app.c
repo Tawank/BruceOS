@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/hal_battery.h"
+#include "hal/hal_charger.h"
 #include "hal/hal_touch.h"
 #include "sdkconfig.h"
 
@@ -374,11 +375,29 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     return hal_device_first(HAL_CLASS_BATTERY) != NULL;
 }
 
+#define DEVICE_BUS__CHARGER_POLL_PERIOD_MS 1000
+
+static int s_charger_plugged = -1; /* -1 until the charger chip has been read. */
+
+/* A charger chip knows external power better than the gauge, which only
+ * sees the battery not discharging. Its status is one register, read every
+ * second so a cable shows at once; it measures with the battery level. */
+static void device_bus__charger_poll(bool measure) {
+    bruce_device_power_t power;
+    if (hal_charger_read(hal_device_first(HAL_CLASS_CHARGER), measure, &power) != BRUCE_OK) return;
+    device__set_power_internal(&power);
+    int plugged = power.power_good && power.input != BRUCE_POWER_INPUT_NONE && power.input != BRUCE_POWER_INPUT_OTG;
+    if (plugged == s_charger_plugged) return;
+    s_charger_plugged = plugged;
+    int percent = device__get_battery();
+    if (percent >= 0) device__set_battery_internal(percent, plugged);
+}
+
 static bool device_bus__battery_read(int *out_percent, bool *out_charging) {
     hal_battery_reading_t reading;
     if (hal_battery_read(hal_device_first(HAL_CLASS_BATTERY), &reading) != BRUCE_OK) return false;
     *out_percent = reading.percent;
-    *out_charging = reading.charging;
+    *out_charging = s_charger_plugged >= 0 ? s_charger_plugged : reading.charging;
     return true;
 }
 
@@ -414,12 +433,21 @@ int device_bus_app_main(int argc, char **argv) {
 
     /* The first reading at once, so the level shows right after boot; a failed one is tried again soon. */
     uint64_t next_battery_poll_at = 0;
+#if defined(DEVICE_BUS__BATTERY_BACKEND_HAL)
+    uint64_t next_charger_poll_at = 0;
+#endif
     while (process__current_signal() == 0) {
 #if CONFIG_BRUCE_TOUCH_ENABLED
         device_bus__touch_poll(bus);
 #endif
 #if !defined(DEVICE_BUS__NO_I2C_BATTERY)
         uint64_t now = runtime__now();
+#if defined(DEVICE_BUS__BATTERY_BACKEND_HAL)
+        if (now >= next_charger_poll_at) {
+            device_bus__charger_poll(now >= next_battery_poll_at);
+            next_charger_poll_at = now + DEVICE_BUS__CHARGER_POLL_PERIOD_MS;
+        }
+#endif
         if (now >= next_battery_poll_at) {
             bool read = device_bus__battery_poll(bus);
             next_battery_poll_at = now + (read ? DEVICE_BUS__BATTERY_POLL_PERIOD_MS : DEVICE_BUS__BATTERY_RETRY_MS);

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "core_sdk/device.h"
 #include "core_sdk/result.h"
 
 /* Device state is initialized lazily by the public getters. */
@@ -52,3 +53,5 @@ void device__wake_waiter(device__waiter_t waiter);
 /* The latest battery level from an I2C gauge, set by device_bus; what
  * device__get_battery() returns on those boards. */
 void device__set_battery_internal(int percent, bool charging);
+/* The charger chip's latest reading (device_bus). */
+void device__set_power_internal(const bruce_device_power_t *power);

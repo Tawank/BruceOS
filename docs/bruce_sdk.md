@@ -7382,6 +7382,83 @@ power chip; false on boards that only measure the battery voltage.
 
 ---
 
+## bruce_power_input_t()
+
+```c
+typedef enum {
+    BRUCE_POWER_INPUT_UNKNOWN,           /**< Not read yet. */
+    BRUCE_POWER_INPUT_NONE,              /**< Nothing plugged in. */
+    BRUCE_POWER_INPUT_USB_HOST,          /**< A computer's USB port (up to 500 mA). */
+    BRUCE_POWER_INPUT_USB_CHARGING_HOST, /**< A computer port that charges (up to 1.5 A). */
+    BRUCE_POWER_INPUT_USB_CHARGER,       /**< A wall charger. */
+    BRUCE_POWER_INPUT_FAST_CHARGER,      /**< A charger that can raise its voltage (HVDCP). */
+    BRUCE_POWER_INPUT_ADAPTER,           /**< Another power supply. */
+    BRUCE_POWER_INPUT_OTG,               /**< The device powers what is plugged in. */
+} bruce_power_input_t;
+```
+
+What is plugged into the USB port, as the charger chip sees it.
+
+
+---
+
+## bruce_charge_state_t()
+
+```c
+typedef enum {
+    BRUCE_CHARGE_UNKNOWN,
+    BRUCE_CHARGE_NOT_CHARGING, /**< Unplugged, or plugged in and not charging. */
+    BRUCE_CHARGE_PRECHARGE,    /**< A deeply discharged battery, at a low current. */
+    BRUCE_CHARGE_CHARGING,
+    BRUCE_CHARGE_FULL,
+} bruce_charge_state_t;
+```
+
+
+---
+
+## bruce_device_power_t()
+
+```c
+typedef struct {
+    bruce_power_input_t input;
+    bool power_good; /**< The input is usable, not just present. */
+    bruce_charge_state_t charge;
+    int32_t input_mv;  /**< USB port voltage, or -1 when not measured. */
+    int32_t charge_ma; /**< Current into the battery, or -1 when not measured. */
+} bruce_device_power_t;
+```
+
+
+---
+
+## device__get_power()
+
+```c
+bruce_result_t device__get_power(bruce_device_power_t *out);
+```
+
+The USB input and charging state from the board's charger chip.
+
+The status is read every second; the voltage and current are measured
+with the battery level (every 5 s), only while something is plugged in.
+
+@return BRUCE_ERR_UNSUPPORTED on boards without a charger chip;
+        BRUCE_ERR_NOT_FOUND until it has been read.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out` | `bruce_device_power_t *` | Filled in. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## device__restart()
 
 ```c

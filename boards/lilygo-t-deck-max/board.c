@@ -2,6 +2,7 @@
  * TDeckMaxBoard.h; more devices move here as their drivers join the HAL. */
 
 #include "hal/drivers/battery/bq27220.h"
+#include "hal/drivers/charger/sy6970.h"
 #include "hal/drivers/gpio/xl9555.h"
 #include "hal/drivers/haptic/drv2605.h"
 #include "hal/drivers/imu/bhi260ap.h"
@@ -25,7 +26,7 @@ HAL_DEVICE(
     )
 );
 
-/* Keyboard, touch, XL9555, ES8311, BQ27220. */
+/* Keyboard, touch, XL9555, ES8311, BQ27220, SY6970. */
 static const hal_i2c_master_config_t i2c0_config = {
     .port = 0, .sda = 13, .scl = 14, .pullup = true, .speed_hz = 400000
 };
@@ -55,6 +56,8 @@ static const xl9555_config_t xl9555_config = {.levels = (1u << 4) | (1u << 6) | 
 HAL_DEVICE(xl9555, .driver = &xl9555_driver, .bus = &i2c0, .address = 0x20, .config = &xl9555_config);
 
 HAL_DEVICE(battery, .driver = &bq27220_driver, .bus = &i2c0, .address = 0x55);
+/* Early boards have a BQ25896 at 0x6B instead (LilyGO's "deprecated"). */
+HAL_DEVICE(charger, .driver = &sy6970_driver, .bus = &i2c0, .address = 0x6A, .optional = true);
 
 HAL_DEVICE(
     touch, .driver = &cst3530_driver, .bus = &i2c0, .address = 0x1A,
@@ -105,6 +108,6 @@ HAL_DEVICE(
 );
 
 HAL_BOARD(
-    "LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &touch, &keyboard,
+    "LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &charger, &touch, &keyboard,
     &keyboard_light, &modem_power, &gps_power, &imu_power, &imu, &motor_power, &motor, &gps, &modem
 );

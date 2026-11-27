@@ -278,6 +278,27 @@ void device__set_battery_internal(int percent, bool charging) {
 
 bool device__is_charging(void) { return s_charging; }
 
+static bruce_device_power_t s_power;
+static bool s_power_read;
+static portMUX_TYPE s_power_lock = portMUX_INITIALIZER_UNLOCKED;
+
+void device__set_power_internal(const bruce_device_power_t *power) {
+    portENTER_CRITICAL(&s_power_lock);
+    s_power = *power;
+    s_power_read = true;
+    portEXIT_CRITICAL(&s_power_lock);
+}
+
+bruce_result_t device__get_power(bruce_device_power_t *out) {
+    if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (hal_device_first(HAL_CLASS_CHARGER) == NULL) return BRUCE_ERR_UNSUPPORTED;
+    portENTER_CRITICAL(&s_power_lock);
+    bool read = s_power_read;
+    *out = s_power;
+    portEXIT_CRITICAL(&s_power_lock);
+    return read ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+}
+
 int device__get_battery(void) {
     int percent = s_cached_battery;
     return percent >= 0 ? percent : BRUCE_ERR_NOT_FOUND;
@@ -409,4 +430,11 @@ int device__get_battery(void) { return BRUCE_ERR_UNSUPPORTED; }
 #if !defined(DEVICE__BATTERY_BACKEND_I2C)
 /* Only the I2C fuel gauges and PMICs report external power. */
 bool device__is_charging(void) { return false; }
+
+bruce_result_t device__get_power(bruce_device_power_t *out) {
+    (void)out;
+    return BRUCE_ERR_UNSUPPORTED;
+}
+
+void device__set_power_internal(const bruce_device_power_t *power) { (void)power; }
 #endif

@@ -21,7 +21,7 @@ device class at a time.
 - **Classes**: `HAL_CLASS_I2C` (`hal_i2c.h`), `HAL_CLASS_SPI` (`hal_spi.h`),
   `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_TOUCH` (`hal_touch.h`),
   `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_IMU` (`hal_imu.h`),
-  `HAL_CLASS_HAPTIC` (`hal_haptic.h`),
+  `HAL_CLASS_HAPTIC` (`hal_haptic.h`), `HAL_CLASS_CHARGER` (`hal_charger.h`),
   `HAL_CLASS_GPIO` (`hal_gpio.h`),
   `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the drivers that need
   them (display, audio codec...).
@@ -97,6 +97,16 @@ and whether external power is in. A board that sets
 `CONFIG_BRUCE_BATTERY_BACKEND_HAL` gets its level from the first battery
 device in `board.c`: the `device_bus` process polls it with
 `hal_battery_read()` as it does the Kconfig backends.
+
+A charger-class driver (`drivers/charger/`, e.g. `sy6970.c`) reports what
+is plugged into the USB port, whether the input is usable, the charge state
+and, while plugged in, the port voltage and charge current. `device_bus`
+reads its status every second (no interrupt: LilyGO wires none on the
+T-Deck MAX) and measures with the battery level every 5 s. It then decides
+`device__is_charging()` (a usable input, not OTG) instead of the gauge, and
+`device__get_power()` returns the whole reading. The SY6970 driver writes only REG02's one-shot
+measurement bit, and only while something is plugged in, so the chip
+keeps its default charge settings.
 
 ## Input
 
