@@ -1162,12 +1162,15 @@ static void cellular__modem_wake(void) {
     s_modem_asleep = false;
     s_after_sleep = true;
     for (int attempt = 0; attempt < 10 && !cellular__command("AT", 300); ++attempt) {}
+    ESP_LOGI(TAG, "modem awake");
 }
 
 /* While the device is suspended the modem sleeps too (DTR high, after
- * AT+CSCLK=1); its network light goes out. RI still reports calls and texts. */
+ * AT+CSCLK=1); its network light goes out. RI still reports calls and texts.
+ * An idle data link stays up (no LCP echo); a link being dialled keeps it awake. */
 static void cellular__modem_sleep_step(void) {
-    bool want = CONFIG_BRUCE_CELLULAR_DTR_GPIO >= 0 && device__pm_asleep() && !s_mux && !s_after_sleep &&
+    bool dialling = s_data_running && !s_data_connected;
+    bool want = CONFIG_BRUCE_CELLULAR_DTR_GPIO >= 0 && device__pm_asleep() && !dialling && !s_after_sleep &&
                 !cellular__in_call() && uxQueueMessagesWaiting(s_requests) == 0;
     if (want == s_modem_asleep) return;
     if (!want) {
@@ -1178,6 +1181,7 @@ static void cellular__modem_sleep_step(void) {
     cellular__sleep_baseline();
     cellular__set_dtr(true);
     s_modem_asleep = true;
+    ESP_LOGI(TAG, "modem sleeping");
 }
 
 /* RI pulses for each call, text and report. If the chip may have been
@@ -1422,6 +1426,7 @@ static void cellular__data_route(void) {
 
 /* Keeps the data link up while mobile data is on. Runs on the modem task. */
 static void cellular__data_step(void) {
+    if (s_modem_asleep) return;
     if (s_ppp != NULL) cellular__data_route();
     cellular__lock();
     bool ready = cellular__model_state(&s_model) == BRUCE_CELLULAR_READY;
@@ -1665,7 +1670,8 @@ bruce_result_t cellular__get_status(bruce_cellular_status_t *out) {
 
 bool cellular__data_online(void) { return s_data_connected; }
 
-bool cellular__mux_running(void) { return s_mux; }
+/* A sleeping modem sends nothing, so the UART can't miss any of it. */
+bool cellular__mux_running(void) { return s_mux && !s_modem_asleep; }
 
 bool cellular__data_pending(void) {
     return s_enabled && !s_failed && s_data_enabled && !s_data_failed && !s_data_connected;

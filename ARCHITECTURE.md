@@ -557,8 +557,9 @@ frequency scaling, so APB-clocked peripherals keep their timing.
   every 20 ms only while a key, button or finger is down.
 - **Modem:** an RI pulse while the chip may have slept starts the same
   `AT+CLCC`/`AT+CPMS?` catch-up as after a suspend, since the UART missed
-  what came meanwhile. While suspended (and without a call, mobile data or
-  a queued request) the modem sleeps too: DTR high after `AT+CSCLK=1`, which
+  what came meanwhile. While suspended (and without a call, a data link
+  being dialled or a queued request) the modem sleeps too, an idle data
+  link included (lwIP sends no LCP echo): DTR high after `AT+CSCLK=1`, which
   puts its network light out (SIMCom's A76XX Sleep Mode note). RI, a request
   or waking drops DTR, waits for `AT`, and catches up the same way.
 - **Suspended:** the backlight and keyboard light are off and input is
