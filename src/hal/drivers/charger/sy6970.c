@@ -8,6 +8,7 @@
 /* Registers from Silergy's AN_SY6970 (Rev 0.1). */
 #define SY6970_REG_ADC 0x02    /* Bit 7 CONV_START: one measurement, done within 1 s. */
 #define SY6970_REG_CONTROL 0x03 /* Bit 6 WD_RST, bit 5 OTG_CONFIG (boost, with the OTG pin high). */
+#define SY6970_REG_BATFET 0x09  /* Bit 5 BATFET_DIS, bit 3 BATFET_DLY. */
 #define SY6970_REG_STATUS 0x0B /* 7:5 BUS_STAT, 4:3 CHRG_STAT, 2 PG_STAT. */
 #define SY6970_REG_VBUS 0x11   /* 6:0 BUSV: 2.6 V + 100 mV steps. */
 #define SY6970_REG_ICHG 0x12   /* 6:0 ICHGR: 50 mA steps. */
@@ -15,6 +16,8 @@
 #define SY6970_CONV_START 0x80
 #define SY6970_WD_RST 0x40
 #define SY6970_OTG_CONFIG 0x20
+#define SY6970_BATFET_DIS 0x20
+#define SY6970_BATFET_DLY 0x08
 #define SY6970_PN 1
 #define SY6970_SPEED_HZ 400000
 #define SY6970_TIMEOUT_MS 100
@@ -121,7 +124,19 @@ static void sy6970__describe(const hal_device_t *device, char *out, size_t size)
              charges[power.charge]);
 }
 
-static const hal_charger_api_t sy6970__api = {.read = sy6970__read_power, .set_otg = sy6970__set_otg};
+/* BATFET off at once (no 10-15 s delay): the battery is cut off. /QON low
+ * for 1.25-2.25 s or plugging in BUS turns it back on (LilyGO's
+ * PPM.shutdown(); on the T-Deck MAX /QON is the side button, KEY1). */
+static bruce_result_t sy6970__ship_mode(const hal_device_t *device) {
+    sy6970_t *chip = device->state->data;
+    return sy6970__update(chip->i2c, SY6970_REG_BATFET, SY6970_BATFET_DIS | SY6970_BATFET_DLY, SY6970_BATFET_DIS)
+               ? BRUCE_OK
+               : BRUCE_ERR_IO;
+}
+
+static const hal_charger_api_t sy6970__api = {
+    .read = sy6970__read_power, .set_otg = sy6970__set_otg, .ship_mode = sy6970__ship_mode
+};
 
 const hal_driver_t sy6970_driver = {
     .name = "sy6970",

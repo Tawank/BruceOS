@@ -2,6 +2,7 @@
 
 #include "board_i2c.h"
 #include "hal/hal.h"
+#include "hal/hal_charger.h"
 #include "hal/hal_gpio.h"
 
 #include "core/display/display.h"
@@ -63,6 +64,21 @@ static void device__restart_task(void *context) {
     esp_restart();
 }
 
+/* A charger that can cut the battery off powers the whole board down, not
+ * just the ESP. Not on USB: the battery would then stop charging until
+ * the next plug. Touch is held in reset first, as LilyGO does, so it comes
+ * back up clean. Returns only if the board is still powered. */
+static void device__ship_mode(void) {
+    const hal_device_t *charger = hal_device_first(HAL_CLASS_CHARGER);
+    bruce_device_power_t power;
+    if (charger == NULL || hal_charger_read(charger, false, &power) != BRUCE_OK || power.input != BRUCE_POWER_INPUT_NONE) {
+        return;
+    }
+    const hal_pin_t *touch_reset = hal_device_pin(hal_device_first(HAL_CLASS_TOUCH), "reset");
+    if (touch_reset != NULL) (void)hal_pin_set(touch_reset, true);
+    if (hal_charger_ship_mode(charger) == BRUCE_OK) vTaskDelay(pdMS_TO_TICKS(500));
+}
+
 static void device__power_off_task(void *context) {
     uint32_t delay_ms = (uint32_t)(uintptr_t)context;
     if (delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(delay_ms));
@@ -70,6 +86,7 @@ static void device__power_off_task(void *context) {
     display__freeze(true);
     gps__power_off();
     cellular__power_off();
+    device__ship_mode();
 #if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,

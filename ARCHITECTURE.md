@@ -966,8 +966,13 @@ it for bounded RAM, PSRAM, or swap reads without exposing raw-memory access
 through the ordinary storage command. `free` reports Core-provided internal RAM
 and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
 stack high-water bytes, and tracked heap usage for each Core-managed process.
-`shutdown <now|+minutes|HH:MM>` releases a board power-hold latch when present
-and enters deep sleep on every board. Its time syntax follows Linux: `now`
+`shutdown <now|+minutes|HH:MM>` turns the whole board off where its charger
+can cut the battery off and nothing is plugged into USB (T-Deck MAX: the
+SY6970's ship mode, with touch held in reset first as LilyGO does; the side
+button, wired only to the SY6970's /QON, turns it back on after 1.25-2.25 s).
+Otherwise it releases a board power-hold latch when present and enters deep
+sleep. On USB the battery is never cut off, since it would then stop
+charging until the next plug. Its time syntax follows Linux: `now`
 shuts down immediately, `+minutes` waits that many minutes, and a 24-hour
 `HH:MM` time schedules the next occurrence in local time. `reboot` restarts
 immediately.

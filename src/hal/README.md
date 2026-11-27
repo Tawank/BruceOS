@@ -108,7 +108,10 @@ T-Deck MAX) and measures with the battery level every 5 s. It then decides
 measurement bit, and only while something is plugged in, so the chip
 keeps its default charge settings. Its optional `set_otg` powers the USB
 port from the battery (`hal_charger_set_otg()`, for USB host); while
-on, the driver resets the chip's I2C watchdog on every read.
+on, the driver resets the chip's I2C watchdog on every read. Its optional
+`ship_mode` cuts the battery off for power-off (`hal_charger_ship_mode()`:
+the SY6970's BATFET_DIS, at once); the chip's /QON button or a USB plug
+turns it back on.
 
 ## Input
 

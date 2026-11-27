@@ -7556,8 +7556,10 @@ bruce_result_t device__power_off(uint32_t delay_ms);
 
 Schedules device power-off after delay_ms.
 
-Releases a configured power-hold latch, then enters deep sleep. Boards
-without a latch enter deep sleep directly.
+On boards whose charger can cut the battery off (T-Deck MAX), and with
+nothing plugged into USB, the whole board turns off; its power button
+turns it back on. Otherwise releases a configured power-hold latch, then
+enters deep sleep; boards without a latch enter deep sleep directly.
 
 ### Parameters
 
