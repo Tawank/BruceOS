@@ -69,12 +69,15 @@ bruce_result_t device__prevent_sleep(bool prevent) {
     return BRUCE_OK;
 }
 
-const char *device__awake_reason(void) {
+bool device__app_awake(void) {
     portENTER_CRITICAL(&s_holders_lock);
     bool held = false;
     for (int i = 0; i < DEVICE__AWAKE_HOLDERS; ++i) held |= s_holders[i].process != BRUCE_PROCESS_ID_INVALID;
     portEXIT_CRITICAL(&s_holders_lock);
-    if (held) return "app";
+    return held;
+}
+
+const char *device__awake_reason(void) {
     if (cellular__in_call()) return "call";
     if (audio__file_is_playing()) return "audio";
     /* The console would drop; a charger alone sends no USB frames. */

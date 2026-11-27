@@ -66,7 +66,7 @@ void device__idle_poll(void) {
 
     if (!sleep_due) return;
     s_held_at = now;
-    if (reason != NULL) return;
+    if (reason != NULL || device__app_awake()) return;
     ESP_LOGI(TAG, "idle for %d s: suspending", (int)(s_sleep_ms / 1000));
     if (app_runner__run_command("suspend", BRUCE_LAUNCH_BACKGROUND) < 0) ESP_LOGW(TAG, "suspend failed to start");
 }

@@ -15,7 +15,9 @@
 void device__power_hold_init(void);
 /* The keyboard backlight at its setting (on) or off, without saving. */
 void device__keyboard_light_apply(bool on);
-/* Why the device must not sleep now ("app", "call", "audio", "usb"), or NULL. */
+/* Whether a process called device__prevent_sleep(true): no suspend, but the chip may light-sleep. */
+bool device__app_awake(void);
+/* Why neither the device nor the chip may sleep now ("call", "audio", "usb"), or NULL. */
 const char *device__awake_reason(void);
 /* Why the chip must not light-sleep even with the screen off ("gps", ...), or NULL. */
 const char *device__chip_reason(void);

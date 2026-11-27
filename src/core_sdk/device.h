@@ -48,12 +48,13 @@ bruce_result_t device__power_off(uint32_t delay_ms);
 /**
  * @brief Puts the device to sleep until the Select button is pressed.
  *
- * Blocks until wake-up. The backlight is off and input is dropped; an
- * e-paper panel keeps showing what it shows now (drawing still in progress
- * is not shown -- see display__wait_shown()). Waits for the button to be
- * released first. On boards with automatic light sleep, other processes
- * keep running: their delays and timers wake the chip when due, and
- * device__wake() turns the screen back on. Elsewhere everything pauses.
+ * Blocks until wake-up. Waits for the button to be released first; then the
+ * backlight is off and input is dropped. On boards with automatic light
+ * sleep, other processes keep running and drawing (an e-paper panel keeps
+ * updating): the chip sleeps while every task waits and wakes when a delay
+ * or timer is due, and device__wake() turns the screen back on. Elsewhere
+ * everything pauses, and an e-paper panel keeps showing what it shows now
+ * (drawing still in progress is not shown -- see display__wait_shown()).
  *
  * @return BRUCE_ERR_UNSUPPORTED on boards without a Select button.
  * @permission process
@@ -70,7 +71,9 @@ bruce_result_t device__wake(void);
 /**
  * @brief Keeps the device from sleeping when idle, or lets it again.
  *
- * The screen still dims. Cleared when the process ends.
+ * The screen still dims, and on boards with automatic light sleep the chip
+ * still sleeps between the process's delays, so its drawing goes on. Cleared
+ * when the process ends.
  *
  * @param prevent true to hold the device awake.
  * @return BRUCE_ERR_RESOURCE_LIMIT when too many processes hold it.

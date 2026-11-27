@@ -324,11 +324,8 @@ static void clock_screens__build(clock_view_t *view, const clock_scene_t *scene,
     } else {
         clock_screens__build_stopwatch(view, content, scene, layout, &sizes);
     }
-    /* The bare face opens the menu on a tap anywhere. */
-    if (face && !bar && !layout->preview) {
-        lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
-        clock_screens__on_click(view, screen, CLOCK_ACTION_OPEN_MENU, 0);
-    }
+    /* The bare face opens the menu on a tap anywhere; its content fills the screen. */
+    if (face && !bar && !layout->preview) clock_screens__on_click(view, content, CLOCK_ACTION_OPEN_MENU, 0);
     if (bar) clock_screens__add_bar(view, screen, &sizes, layout->screen);
 }
 

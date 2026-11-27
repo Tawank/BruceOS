@@ -46,6 +46,8 @@ typedef struct {
     uint8_t key_count;
     uint32_t last_key;
     bool touch_down;
+    bool touch_seen; /* LVGL has read this press. */
+    bool touch_lift; /* Released before LVGL read the press. */
     lv_point_t touch;
     lv_theme_t theme;
     lv_style_t screen_style;
@@ -346,6 +348,7 @@ static void lvgl__set_theme(lvgl__state_t *state) {
 
     lv_style_init(&state->current_style);
     lv_style_set_bg_color(&state->current_style, surface);
+    lv_style_set_text_color(&state->current_style, text); /* The default theme's is white. */
     lv_style_set_border_color(&state->current_style, secondary);
     lv_style_set_border_width(&state->current_style, 1);
 
@@ -395,6 +398,9 @@ static void lvgl__read_pointer(lv_indev_t *indev, lv_indev_data_t *data) {
     lvgl__state_t *state = lvgl__state();
     data->point = state->touch;
     data->state = state->touch_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    if (!state->touch_down) return;
+    state->touch_seen = true;
+    if (state->touch_lift) state->touch_down = state->touch_lift = false;
 }
 
 /* Semantic keys (value != code) to LVGL's control keys; 0 when not one. */
@@ -419,7 +425,15 @@ void lvgl__input(const bruce_input_event_t *event) {
     if (state == NULL || event == NULL) return;
     if (event->type == BRUCE_INPUT_TOUCH) {
         state->touch = (lv_point_t){.x = event->x, .y = event->y};
-        state->touch_down = event->action != BRUCE_INPUT_RELEASE;
+        if (event->action != BRUCE_INPUT_RELEASE) {
+            if (!state->touch_down) state->touch_seen = false;
+            state->touch_down = true;
+            state->touch_lift = false;
+        } else if (state->touch_seen) {
+            state->touch_down = false;
+        } else {
+            state->touch_lift = true; /* A tap between two reads still clicks. */
+        }
         return;
     }
     if (event->action != BRUCE_INPUT_PRESS) return;

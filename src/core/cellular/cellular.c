@@ -1146,6 +1146,39 @@ static void cellular__resync(void) {
 #if CONFIG_FREERTOS_USE_TICKLESS_IDLE && CONFIG_BRUCE_CELLULAR_RI_GPIO >= 0
 static const hal_pin_t s_ri = {.number = CONFIG_BRUCE_CELLULAR_RI_GPIO, .flags = HAL_PIN_ACTIVE_LOW};
 static bool s_ri_armed;
+static bool s_modem_asleep;
+
+static void cellular__sleep_baseline(void) {
+    cellular__lock();
+    s_sleep_sms_used = s_model.sms_used;
+    s_sleep_sequence = s_message_sequence;
+    cellular__unlock();
+}
+
+/* DTR low wakes the modem; cellular__resync() then catches up. */
+static void cellular__modem_wake(void) {
+    if (!s_modem_asleep) return;
+    cellular__set_dtr(false);
+    s_modem_asleep = false;
+    s_after_sleep = true;
+    for (int attempt = 0; attempt < 10 && !cellular__command("AT", 300); ++attempt) {}
+}
+
+/* While the device is suspended the modem sleeps too (DTR high, after
+ * AT+CSCLK=1); its network light goes out. RI still reports calls and texts. */
+static void cellular__modem_sleep_step(void) {
+    bool want = CONFIG_BRUCE_CELLULAR_DTR_GPIO >= 0 && device__pm_asleep() && !s_mux && !s_after_sleep &&
+                !cellular__in_call() && uxQueueMessagesWaiting(s_requests) == 0;
+    if (want == s_modem_asleep) return;
+    if (!want) {
+        cellular__modem_wake();
+        return;
+    }
+    cellular__command("AT+CPMS?", 3000);
+    cellular__sleep_baseline();
+    cellular__set_dtr(true);
+    s_modem_asleep = true;
+}
 
 /* RI pulses for each call, text and report. If the chip may have been
  * asleep, the UART missed part of it: ask the modem, as after a suspend. */
@@ -1154,14 +1187,19 @@ static void cellular__ri_check(void) {
         s_ri_armed = hal_pin_irq_enable(&s_ri, true) == BRUCE_OK;
         return;
     }
-    if (!hal_pin_irq_take(&s_ri) || device__pm_awake()) return;
-    cellular__lock();
-    s_sleep_sms_used = s_model.sms_used;
-    s_sleep_sequence = s_message_sequence;
-    cellular__unlock();
+    if (!hal_pin_irq_take(&s_ri)) return;
+    if (s_modem_asleep) {
+        cellular__modem_wake();
+        return;
+    }
+    if (device__pm_awake()) return;
+    cellular__sleep_baseline();
     s_after_sleep = true;
 }
 #else
+static bool s_modem_asleep;
+static void cellular__modem_wake(void) {}
+static void cellular__modem_sleep_step(void) {}
 static void cellular__ri_check(void) {}
 #endif
 
@@ -1483,18 +1521,22 @@ static void cellular__session(void) {
     char line[CELLULAR__LINE_MAX];
     while (s_enabled && !s_restart) {
         cellular__request_t *request = NULL;
-        if (xQueueReceive(s_requests, &request, 0) == pdTRUE) cellular__run_request(request);
+        if (xQueueReceive(s_requests, &request, 0) == pdTRUE) {
+            cellular__modem_wake();
+            cellular__run_request(request);
+        }
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
         cellular__vibrate();
         cellular__sms_arrived();
         cellular__ri_check();
+        cellular__modem_sleep_step();
         cellular__resync();
         cellular__update_status_icon();
         cellular__data_step();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
-        if (now - polled_at >= (in_call ? CELLULAR__POLL_CALL_MS : CELLULAR__POLL_IDLE_MS)) {
+        if (!s_modem_asleep && now - polled_at >= (in_call ? CELLULAR__POLL_CALL_MS : CELLULAR__POLL_IDLE_MS)) {
             if (in_call) {
                 (void)cellular__poll_call();
             } else {
@@ -1503,6 +1545,7 @@ static void cellular__session(void) {
             polled_at = cellular__now();
         }
     }
+    cellular__modem_wake();
     if (cellular__in_call()) cellular__command("AT+CHUP", 2000);
     cellular__data_stop();
     cellular__mux_stop();

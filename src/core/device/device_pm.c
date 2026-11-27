@@ -91,7 +91,6 @@ bruce_result_t device__pm_sleep(void) {
     if (!already) {
         (void)xSemaphoreTake(s_woken, 0);
         event_loop__set_input_blocked(true);
-        display__freeze(true);
         display__light_off(true);
         device__keyboard_light_apply(false);
         ESP_LOGI(TAG, "asleep");
@@ -110,7 +109,6 @@ void device__pm_wake(bool by_select) {
     device__pm_hold(true);
     display__light_off(false);
     device__keyboard_light_apply(true);
-    display__freeze(false);
     event_loop__note_input();
 #if CONFIG_BRUCE_BUTTON_SELECT_ENABLED
     /* The press that woke the device is not input: drop it until the input

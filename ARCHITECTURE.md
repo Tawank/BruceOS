@@ -530,9 +530,9 @@ progress, which keeps the screen up while it rings or talks.
   keyboard light goes off; any input restores both.
 - **Sleep** (`display.sleepTimeout`, Display & UI > Sleep time,
   `config display sleep N`; 0, the default, is never): Core starts
-  `suspend` in the background, unless `device__awake_reason()` names a
-  holder: a process that called `device__prevent_sleep(true)` (cleared when
-  it ends), a call, a file playing, or a USB host on the serial console
+  `suspend` in the background, unless a process called
+  `device__prevent_sleep(true)` (cleared when it ends) or `device__awake_reason()` names a call, a file playing, or a
+  USB host on the serial console
   (a charger sends no frames, so it doesn't count). A held device tries again a
   sleep time after it was last held.
 
@@ -557,7 +557,15 @@ frequency scaling, so APB-clocked peripherals keep their timing.
   every 20 ms only while a key, button or finger is down.
 - **Modem:** an RI pulse while the chip may have slept starts the same
   `AT+CLCC`/`AT+CPMS?` catch-up as after a suspend, since the UART missed
-  what came meanwhile.
+  what came meanwhile. While suspended (and without a call, mobile data or
+  a queued request) the modem sleeps too: DTR high after `AT+CSCLK=1`, which
+  puts its network light out (SIMCom's A76XX Sleep Mode note). RI, a request
+  or waking drops DTR, waits for `AT`, and catches up the same way.
+- **Suspended:** the backlight and keyboard light are off and input is
+  dropped, but apps keep running and drawing; an e-paper panel keeps
+  updating (a clock keeps ticking). The chip sleeps whenever every task
+  waits. `device__prevent_sleep(true)` only stops the suspend; it doesn't
+  keep the chip awake.
 - **Backlights:** the display and keyboard backlights run LEDC from RC_FAST
   with `LEDC_SLEEP_MODE_KEEP_ALIVE`, so they stay lit.
 - **Audio:** stops the I2S clocks (`i2s_channel_disable()`, pins still
