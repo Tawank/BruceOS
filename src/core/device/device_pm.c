@@ -43,6 +43,9 @@ void device__wake_waiter(device__waiter_t waiter) {
 static esp_pm_lock_handle_t s_awake;
 static bool s_awake_held;
 static volatile bool s_asleep;
+static volatile bool s_next_any_input;
+static volatile bool s_any_input;
+static uint64_t s_slept_at;
 static StaticSemaphore_t s_woken_storage;
 static SemaphoreHandle_t s_woken;
 static portMUX_TYPE s_sleep_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -81,6 +84,10 @@ void device__pm_hold(bool awake) {
 
 bool device__pm_asleep(void) { return s_asleep; }
 
+void device__pm_next_any_input(bool any_input) { s_next_any_input = any_input; }
+
+bool device__pm_input_since_sleep(void) { return s_any_input && event_loop__last_input_ms() > s_slept_at; }
+
 /* Screen off and input dropped; the chip sleeps whenever nothing is due,
  * so app delays and timers still run. */
 bruce_result_t device__pm_sleep(void) {
@@ -90,7 +97,11 @@ bruce_result_t device__pm_sleep(void) {
     portEXIT_CRITICAL(&s_sleep_lock);
     if (!already) {
         (void)xSemaphoreTake(s_woken, 0);
-        event_loop__set_input_blocked(true);
+        s_any_input = s_next_any_input;
+        s_next_any_input = false;
+        s_slept_at = event_loop__last_input_ms();
+        /* After the sleep time, input wakes it and goes to the app. */
+        event_loop__set_input_blocked(!s_any_input);
         display__light_off(true);
         device__keyboard_light_apply(false);
         ESP_LOGI(TAG, "asleep");
@@ -164,6 +175,8 @@ void device__pm_init(void) {
 bool device__pm_awake(void) { return true; }
 void device__pm_hold(bool awake) { (void)awake; }
 bool device__pm_asleep(void) { return false; }
+void device__pm_next_any_input(bool any_input) { (void)any_input; }
+bool device__pm_input_since_sleep(void) { return false; }
 bruce_result_t device__pm_sleep(void) { return BRUCE_ERR_UNSUPPORTED; }
 void device__pm_wake(bool by_select) { (void)by_select; }
 bool device__pm_select_pressed(void) { return false; }

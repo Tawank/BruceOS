@@ -581,7 +581,11 @@ Select is pressed or a call comes in. With automatic light sleep the chip
 keeps running other processes meanwhile, and `device__wake()` (Clock's
 alarms and timers) turns the screen back on. Without it, it is a manual
 light sleep that stops everything until Select or the modem's RI. Keys and
-touch never end it, so it isn't woken by accident. The backlight goes off and back without being saved.
+touch never end it, so it isn't woken by accident. When the sleep time
+started it, with automatic light sleep, input isn't dropped and any key,
+button or touch ends it too (`device__pm_next_any_input()`), reaching the
+app as usual.
+The backlight goes off and back without being saved.
 
 ### Cellular
 

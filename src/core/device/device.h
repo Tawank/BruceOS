@@ -41,6 +41,9 @@ bool device__pm_awake(void);
 /* The screen-off sleep that device__sleep() enters; timers keep running. */
 bruce_result_t device__pm_sleep(void);
 bool device__pm_asleep(void);
+/* The next sleep doesn't drop input, and any input ends it (idle sleep). */
+void device__pm_next_any_input(bool any_input);
+bool device__pm_input_since_sleep(void);
 void device__pm_wake(bool by_select);
 bool device__pm_select_pressed(void);
 /* A poll loop's wait: busy_ms while busy; otherwise, where the chip can

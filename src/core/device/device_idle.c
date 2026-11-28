@@ -19,10 +19,12 @@ static uint64_t s_sleep_ms;
 static bool s_dimmed;
 static uint64_t s_held_at; /* Last time something kept the device from sleeping. */
 
-/* With the screen off: Select or a call turns it back on. */
+/* With the screen off: Select or a call turns it back on, and after idle
+ * sleep any input. */
 static void device__idle_asleep(void) {
-    if (device__pm_select_pressed()) {
-        device__pm_wake(true);
+    bool select = device__pm_select_pressed();
+    if (select || device__pm_input_since_sleep()) {
+        device__pm_wake(select);
     } else if (cellular__in_call()) {
         device__pm_wake(false);
     } else {
@@ -68,5 +70,9 @@ void device__idle_poll(void) {
     s_held_at = now;
     if (reason != NULL || device__app_awake()) return;
     ESP_LOGI(TAG, "idle for %d s: suspending", (int)(s_sleep_ms / 1000));
-    if (app_runner__run_command("suspend", BRUCE_LAUNCH_BACKGROUND) < 0) ESP_LOGW(TAG, "suspend failed to start");
+    device__pm_next_any_input(true);
+    if (app_runner__run_command("suspend", BRUCE_LAUNCH_BACKGROUND) < 0) {
+        device__pm_next_any_input(false);
+        ESP_LOGW(TAG, "suspend failed to start");
+    }
 }
