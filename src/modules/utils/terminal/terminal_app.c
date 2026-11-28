@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "args.h"
@@ -26,6 +27,7 @@
 #define TERMINAL__CHAR_W 6
 #define TERMINAL__CHAR_H 10
 #define TERMINAL__TITLE_H 12
+#define TERMINAL__SWIPE_PX 30
 #define TERMINAL__FRAME_MARGIN 2
 /* Generous upper bound on grid size, purely to keep the cell-buffer
  * allocation bounded; no real board's display comes close to this. */
@@ -75,6 +77,7 @@ typedef struct {
     terminal_grid_t grid;
     bruce_stdio_session_t session;
     bruce_process_id_t child;
+    bool child_running; /* The shell waits on a command it started. */
     bool dirty;
     bool exit_requested;
     float font_scale;      /* See TERMINAL__FONT_SCALE_MIN/MAX above. */
@@ -93,6 +96,10 @@ typedef struct {
     uint16_t sel_cursor_y;
     uint16_t sel_anchor_x;
     uint16_t sel_anchor_y;
+
+    int16_t touch_x; /* Where the finger went down. */
+    int16_t touch_y;
+    bool touch_down;
 } terminal__state_t;
 
 /* Grid geometry (columns/rows) that fits the display at `scale`, using the
@@ -333,7 +340,9 @@ static void terminal__draw_selection(const terminal__state_t *state, uint16_t th
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
     uint16_t foreground = config__get_color_primary();
     uint16_t background = config__get_color_background();
-    uint16_t text_color = config__get_color_text();
+    /* Text over the primary fill (title, cursor, selection). The
+     * e-paper theme has black text and a black primary. */
+    uint16_t text_color = display__is_epaper() ? background : config__get_color_text();
     int width = display__width();
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
@@ -343,11 +352,11 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     display__set_text_color(text_color);
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
-    display__print(
-        state->selecting            ? "Terminal [v=mark y=copy Esc=cancel]"
-        : state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]"
-                                                    : "Terminal"
-    );
+    const char *title = state->child_running ? "Terminal (running)" : "Terminal";
+    if (state->selecting) {
+        title = input__has_keyboard() ? "v: mark  y: copy  Esc: cancel" : "Select: mark, then copy";
+    }
+    display__print(title);
     /* The title bar above is always drawn at size 1 regardless of
      * `font_scale` -- it's fixed chrome, not grid content, and staying
      * legible at TERMINAL__TITLE_H matters more than matching the zoom. */
@@ -526,7 +535,7 @@ static void terminal__handle_selection_input(terminal__state_t *state, const bru
     bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
     const terminal_grid_t *grid = &state->grid;
 
-    if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) ||
+    if ((event->code == BRUCE_INPUT_CODE_BACK && (semantic_key || event->type != BRUCE_INPUT_KEY)) ||
         (event->type == BRUCE_INPUT_KEY && event->code == TERMINAL__ASCII_ESCAPE) ||
         event->code == BRUCE_INPUT_CODE_BUTTON_B) {
         terminal__exit_selection(state);
@@ -614,13 +623,15 @@ static void terminal__handle_selection_input(terminal__state_t *state, const bru
  * terminal__handle_selection_input) and "Paste" (mirrors Ctrl+V below, for
  * boards that can't type a Ctrl chord at all). */
 static void terminal__open_actions_menu(terminal__state_t *state) {
-    const bruce_dialog_choice_t choices[] = {
-        {.label = "Type command...", .value = "type"  },
-        {.label = "Enter",           .value = "enter" },
-        {.label = "Select text...",  .value = "select"},
-        {.label = "Paste",           .value = "paste" },
-        {.label = "Exit terminal",   .value = "exit"  },
-        {.label = "Cancel",          .value = "cancel"},
+    static const bruce_dialog_choice_t choices[] = {
+        {.label = "Type command...", .value = "type"   },
+        {.label = "Enter",           .value = "enter"  },
+        {.label = "Select text...",  .value = "select" },
+        {.label = "Paste",           .value = "paste"  },
+        {.label = "Larger text",     .value = "larger" },
+        {.label = "Smaller text",    .value = "smaller"},
+        {.label = "Exit terminal",   .value = "exit"   },
+        {.label = "Cancel",          .value = "cancel" },
     };
     size_t selected = 0;
     bruce_result_t result =
@@ -637,9 +648,41 @@ static void terminal__open_actions_menu(terminal__state_t *state) {
         terminal__enter_selection(state);
     } else if (strcmp(choices[selected].value, "paste") == 0) {
         terminal__paste_clipboard(state);
+    } else if (strcmp(choices[selected].value, "larger") == 0) {
+        terminal__apply_font_scale(state, state->font_scale + TERMINAL__FONT_SCALE_STEP);
+    } else if (strcmp(choices[selected].value, "smaller") == 0) {
+        terminal__apply_font_scale(state, state->font_scale - TERMINAL__FONT_SCALE_STEP);
     } else if (strcmp(choices[selected].value, "exit") == 0) {
         state->exit_requested = true;
     }
+}
+
+/* Like a real terminal: Ctrl+C sends SIGINT, not a byte, unless the program
+ * asked for raw mode (`stty raw`, a pager, vi). */
+static void terminal__interrupt(terminal__state_t *state) {
+    bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
+    (void)tty__get_mode_of(state->session, &mode);
+    if (mode == BRUCE_TTY_MODE_RAW || state->child == BRUCE_PROCESS_ID_INVALID) {
+        terminal__write_input(state, "\003", 1);
+        return;
+    }
+    terminal_grid__feed(&state->grid, "^C\r\n", 4);
+    state->dirty = true;
+    /* A real tty drops input not read yet on SIGINT too, so a burst typed
+     * just before isn't replayed. */
+    (void)stdio__session_flush_input(state->session);
+    (void)process__signal(state->child, BRUCE_PROCESS_SIGNAL_INT);
+}
+
+/* Pages local history on the main screen. A full-screen app on the
+ * alternate screen has none and gets Page Up/Down itself. */
+static void terminal__page(terminal__state_t *state, bool up) {
+    if (state->grid.alt_screen_active) {
+        terminal__write_input(state, up ? "\033[5~" : "\033[6~", 4);
+        return;
+    }
+    terminal_grid__scroll_view(&state->grid, up ? (int32_t)state->grid.rows : -(int32_t)state->grid.rows);
+    state->dirty = true;
 }
 
 static void terminal__handle_input(terminal__state_t *state, const bruce_input_event_t *event) {
@@ -649,17 +692,19 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
     }
     bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
     /* Esc on the device keyboards is the semantic Back key. In raw mode (vi,
-     * ssh, ncurses apps after raw()/cbreak()) it goes to the program as 0x1b;
-     * otherwise it closes the terminal. The B button always closes. */
-    if (semantic_key && event->code == BRUCE_INPUT_CODE_BACK && state->child != BRUCE_PROCESS_ID_INVALID) {
+     * ssh, ncurses apps after raw()/cbreak()) or while the shell runs a
+     * command it goes to the program as 0x1b; otherwise it closes the
+     * terminal. The B button always closes. */
+    bool back = event->code == BRUCE_INPUT_CODE_BACK && (semantic_key || event->type != BRUCE_INPUT_KEY);
+    if (back && state->child != BRUCE_PROCESS_ID_INVALID) {
         bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
         (void)tty__get_mode_of(state->session, &mode);
-        if (mode == BRUCE_TTY_MODE_RAW) {
+        if (mode == BRUCE_TTY_MODE_RAW || state->child_running) {
             terminal__write_input(state, "\033", 1);
             return;
         }
     }
-    if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) || event->code == BRUCE_INPUT_CODE_BUTTON_B) {
+    if (back || event->code == BRUCE_INPUT_CODE_BUTTON_B) {
         state->exit_requested = true;
         return;
     }
@@ -687,13 +732,11 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
      * which sends it the standard CSI 5~/6~ bytes like any other
      * navigation key. */
     if (semantic_key && event->code == BRUCE_INPUT_CODE_PAGE_UP && !state->grid.alt_screen_active) {
-        terminal_grid__scroll_view(&state->grid, (int32_t)state->grid.rows);
-        state->dirty = true;
+        terminal__page(state, true);
         return;
     }
     if (semantic_key && event->code == BRUCE_INPUT_CODE_PAGE_DOWN && !state->grid.alt_screen_active) {
-        terminal_grid__scroll_view(&state->grid, -(int32_t)state->grid.rows);
-        state->dirty = true;
+        terminal__page(state, false);
         return;
     }
     if (semantic_key || event->type != BRUCE_INPUT_KEY) {
@@ -725,25 +768,9 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
         return;
     }
-    if (event->code == TERMINAL__ASCII_INTERRUPT && state->child != BRUCE_PROCESS_ID_INVALID) {
-        /* Like a real terminal: Ctrl+C doesn't go to the child as a byte, it
-         * sends SIGINT. `stty raw` (see bnu_sys_app.c) opts a program out of
-         * this, so it gets the literal ^C byte instead -- e.g. a pager. */
-        bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
-        (void)tty__get_mode_of(state->session, &mode);
-        if (mode != BRUCE_TTY_MODE_RAW) {
-            terminal_grid__feed(&state->grid, "^C\r\n", 4);
-            state->dirty = true;
-            /* Also discard whatever's already queued but not yet read (a
-             * fast paste/burst typed just before Ctrl+C) -- see
-             * stdio__session_flush_input()'s doc: a real tty flushes pending
-             * input on SIGINT the same way, and without this the leftover
-             * bytes would survive into the child's next read and get
-             * replayed as if freshly typed. */
-            (void)stdio__session_flush_input(state->session);
-            (void)process__signal(state->child, BRUCE_PROCESS_SIGNAL_INT);
-            return;
-        }
+    if (event->code == TERMINAL__ASCII_INTERRUPT) {
+        terminal__interrupt(state);
+        return;
     }
     if (event->code == TERMINAL__ASCII_PASTE) {
         /* Ctrl+V pastes the clipboard, mirroring text_app.c's Ctrl+V --
@@ -765,6 +792,56 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
     } else if (event->code > 0 && event->code <= TERMINAL__ASCII_DELETE) {
         char byte = (char)event->code;
         terminal__write_input(state, &byte, 1);
+    }
+}
+
+/* Moves the selection cursor to the cell under the finger; `anchor` also
+ * starts the selection there. */
+static void terminal__select_at(terminal__state_t *state, int x, int y, bool anchor) {
+    int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
+    int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
+    if (char_w < 1) char_w = 1;
+    if (char_h < 1) char_h = 1;
+    int column = (x - TERMINAL__FRAME_MARGIN) / char_w;
+    int row = (y - TERMINAL__TITLE_H) / char_h;
+    if (column < 0) column = 0;
+    if (row < 0) row = 0;
+    if (column >= state->grid.columns) column = state->grid.columns - 1;
+    if (row >= state->grid.rows) row = state->grid.rows - 1;
+    state->sel_cursor_x = (uint16_t)column;
+    state->sel_cursor_y = (uint16_t)row;
+    if (anchor) {
+        state->sel_anchor_x = state->sel_cursor_x;
+        state->sel_anchor_y = state->sel_cursor_y;
+        state->selection_active = true;
+    }
+    state->dirty = true;
+}
+
+/* A swipe pages the history, a tap types a command when there is no
+ * keyboard, and while selecting a drag marks the text. */
+static void terminal__handle_touch(terminal__state_t *state, const bruce_input_event_t *event) {
+    if (event->action == BRUCE_INPUT_PRESS) {
+        state->touch_x = event->x;
+        state->touch_y = event->y;
+        state->touch_down = true;
+        if (state->selecting) terminal__select_at(state, event->x, event->y, true);
+        return;
+    }
+    if (!state->touch_down) return;
+    if (state->selecting) {
+        terminal__select_at(state, event->x, event->y, false);
+        if (event->action == BRUCE_INPUT_RELEASE) state->touch_down = false;
+        return;
+    }
+    if (event->action != BRUCE_INPUT_RELEASE) return;
+    state->touch_down = false;
+    int dx = event->x - state->touch_x;
+    int dy = event->y - state->touch_y;
+    if (abs(dy) > TERMINAL__SWIPE_PX && abs(dy) >= abs(dx)) {
+        terminal__page(state, dy > 0);
+    } else if (abs(dx) <= TERMINAL__SWIPE_PX && !input__has_keyboard()) {
+        terminal__open_text_input(state);
     }
 }
 
@@ -871,10 +948,10 @@ int terminal_app_main(int argc, char **argv) {
         &state.grid, state.cells, state.alt_cells, state.scrollback, scrollback_rows, (uint16_t)columns,
         (uint16_t)rows
     );
-    terminal_grid__feed(
-        &state.grid, "Bruce terminal\r\nType a command and press Enter.\r\n",
-        strlen("Bruce terminal\r\nType a command and press Enter.\r\n")
-    );
+    const char *welcome = input__has_keyboard() ? "Bruce terminal\r\nType a command and press Enter.\r\n"
+                          : input__has_touch()  ? "Bruce terminal\r\nTap the screen to type a command.\r\n"
+                                                : "Bruce terminal\r\nPress Select for the menu.\r\n";
+    terminal_grid__feed(&state.grid, welcome, strlen(welcome));
     (void)input__flush();
 
     if (stdio__session_create(&state.session) != BRUCE_OK) {
@@ -912,7 +989,9 @@ int terminal_app_main(int argc, char **argv) {
         terminal__drain_output(&state);
         if (state.child != BRUCE_PROCESS_ID_INVALID) {
             bruce_process_snapshot_t child;
-            if (process__snapshot(state.child, &child) != BRUCE_OK) {
+            bruce_result_t snapshot = process__snapshot(state.child, &child);
+            state.child_running = snapshot == BRUCE_OK && child.blocked_on_wait;
+            if (snapshot != BRUCE_OK) {
                 bruce_process_status_t status;
                 (void)process__wait_status(state.child, 0, &status);
                 state.child = BRUCE_PROCESS_ID_INVALID;
@@ -938,8 +1017,12 @@ int terminal_app_main(int argc, char **argv) {
             was_backgrounded = false;
             state.dirty = true;
         }
-        if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
-        terminal__handle_input(&state, &event);
+        if (input_result != BRUCE_OK) continue;
+        if (event.type == BRUCE_INPUT_TOUCH) {
+            terminal__handle_touch(&state, &event);
+        } else if (event.action == BRUCE_INPUT_PRESS) {
+            terminal__handle_input(&state, &event);
+        }
     }
 
     if (state.child != BRUCE_PROCESS_ID_INVALID) {
