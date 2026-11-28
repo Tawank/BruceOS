@@ -10,11 +10,11 @@
 #define HUD_MARGIN 4
 #define HUD_PAD 4
 #define HUD_GAP 3
-#define HUD_PANEL 0x2124
 #define HUD_TEXT BRUCE_COLOR_WHITE
-#define HUD_MUTED 0xAD55
 #define HUD_ACCENT 0xFB20
-#define HUD_INK 0x2104
+#define HUD_GREY_PANEL 0x2124
+#define HUD_GREY_MUTED 0xAD55
+#define HUD_GREY_INK 0x2104
 #define HUD_SCALE_MAX_PX 70
 #define HUD_CROSS 6
 #define HUD_BUTTON_SIZE 28
@@ -25,6 +25,11 @@
 #define HUD_ROUTE 0x2B9F
 #define HUD_ROUTE_WIDTH 5
 #define HUD_ARROW_WIDTH 3
+
+/* Grey dithers into dots on e-paper: black panels, white text, black ink there. */
+static bruce_display_color_t s_panel = HUD_GREY_PANEL;
+static bruce_display_color_t s_muted = HUD_GREY_MUTED;
+static bruce_display_color_t s_ink = HUD_GREY_INK;
 
 static int16_t s_char_w = 6;
 static int16_t s_char_h = 8;
@@ -59,7 +64,7 @@ static int hud__pill_width(const char *text, const char *icon) {
 /* Rounded label with an optional leading icon. */
 static void hud__pill(const char *text, const char *icon, int x, int y, bruce_display_color_t color) {
     int h = hud__pill_height();
-    display__fill_round_rect(x, y, hud__pill_width(text, icon), h, h / 2, HUD_PANEL);
+    display__fill_round_rect(x, y, hud__pill_width(text, icon), h, h / 2, s_panel);
     int text_x = x + HUD_PAD;
     if (icon != NULL) {
         hud__icon(icon, text_x, y + (h - hud__icon_size()) / 2, hud__icon_size(), color);
@@ -79,8 +84,8 @@ static void hud__format_degrees(char *out, size_t capacity, double value) {
 static void hud__draw_crosshair(int cx, int cy) {
     display__fill_rect(cx - HUD_CROSS - 1, cy - 1, 2 * HUD_CROSS + 3, 3, BRUCE_COLOR_WHITE);
     display__fill_rect(cx - 1, cy - HUD_CROSS - 1, 3, 2 * HUD_CROSS + 3, BRUCE_COLOR_WHITE);
-    display__fill_rect(cx - HUD_CROSS, cy, 2 * HUD_CROSS + 1, 1, HUD_INK);
-    display__fill_rect(cx, cy - HUD_CROSS, 1, 2 * HUD_CROSS + 1, HUD_INK);
+    display__fill_rect(cx - HUD_CROSS, cy, 2 * HUD_CROSS + 1, 1, s_ink);
+    display__fill_rect(cx, cy - HUD_CROSS, 1, 2 * HUD_CROSS + 1, s_ink);
     display__fill_circle(cx, cy, 2, HUD_ACCENT);
 }
 
@@ -92,7 +97,7 @@ static void hud__draw_pin(const map_view_t *view, double lat, double lon, int wi
     if (x < -HUD_PIN_SIZE || x > width || y < -HUD_PIN_SIZE || y > height) return;
     static const int8_t halo[][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     for (size_t i = 0; i < sizeof(halo) / sizeof(halo[0]); ++i) {
-        hud__icon("map-marker", x + halo[i][0], y + halo[i][1], HUD_PIN_SIZE, HUD_INK);
+        hud__icon("map-marker", x + halo[i][0], y + halo[i][1], HUD_PIN_SIZE, s_ink);
     }
     hud__icon("map-marker", x, y, HUD_PIN_SIZE, HUD_ACCENT);
 }
@@ -104,7 +109,7 @@ static void hud__draw_me(const map_view_t *view, double lat, double lon, int wid
     int y = point.y - view->center.y + height / 2;
     int r = HUD_ME_RADIUS + 3;
     if (x < -r || x > width + r || y < -r || y > height + r) return;
-    display__fill_circle(x, y, HUD_ME_RADIUS + 3, HUD_INK);
+    display__fill_circle(x, y, HUD_ME_RADIUS + 3, s_ink);
     display__fill_circle(x, y, HUD_ME_RADIUS + 2, BRUCE_COLOR_WHITE);
     display__fill_circle(x, y, HUD_ME_RADIUS, HUD_ME);
 }
@@ -184,7 +189,7 @@ static void hud__draw_maneuver(const route_step_t *step, int x, int y, int size,
     int head = size / 4;
     if (step->turn == ROUTE_ARRIVE) {
         display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(size / 3), color);
-        display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(size / 3 - HUD_ARROW_WIDTH), HUD_PANEL);
+        display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(size / 3 - HUD_ARROW_WIDTH), s_panel);
         display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(size / 8), color);
         return;
     }
@@ -201,7 +206,7 @@ static void hud__draw_maneuver(const route_step_t *step, int x, int y, int size,
     if (step->turn == ROUTE_ROUNDABOUT) {
         int r = size / 5;
         display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)r, color);
-        display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(r - HUD_ARROW_WIDTH + 1), HUD_PANEL);
+        display__fill_circle((int16_t)cx, (int16_t)cy, (int16_t)(r - HUD_ARROW_WIDTH + 1), s_panel);
         hud__thick_line((int)cx, y + size - 2, (int)cx, (int)(cy + r), HUD_ARROW_WIDTH, color);
         double ex = cx + dx * r, ey = cy + dy * r;
         double tip_x = cx + dx * (size / 2.0 - 2), tip_y = cy + dy * (size / 2.0 - 2);
@@ -299,7 +304,7 @@ hud_rect_t hud__banner_rect(int width) {
 /* The next manoeuvre: arrow, distance to it, and the instruction on up to two lines. Returns its bottom. */
 static int hud__draw_banner(const hud_state_t *state, int width) {
     hud_rect_t box = hud__banner_rect(width);
-    display__fill_round_rect(box.x, box.y, box.w, box.h, 6, HUD_PANEL);
+    display__fill_round_rect(box.x, box.y, box.w, box.h, 6, s_panel);
     int arrow = box.h - 2 * HUD_PAD;
     hud__draw_maneuver(state->banner_step, box.x + HUD_PAD, box.y + HUD_PAD, arrow, HUD_TEXT);
     int text_x = box.x + HUD_PAD + arrow + HUD_GAP + 2;
@@ -323,7 +328,7 @@ static int hud__draw_banner(const hud_state_t *state, int width) {
         snprintf(text, sizeof(text), "Then %s", state->banner_then);
         if (text[5] >= 'A' && text[5] <= 'Z') text[5] = (char)(text[5] - 'A' + 'a');
         hud__fit(text, strlen(text), width - 2 * HUD_MARGIN - 2 * HUD_PAD, then, sizeof(then));
-        hud__pill(then, NULL, HUD_MARGIN, bottom, HUD_MUTED);
+        hud__pill(then, NULL, HUD_MARGIN, bottom, s_muted);
         bottom += hud__pill_height() + 2;
     }
     return bottom;
@@ -337,13 +342,13 @@ static void hud__draw_summary(const char *summary, int width, int height) {
 
 static void hud__draw_search(const map_view_t *view, const hud_state_t *state, int width) {
     hud_rect_t box = hud__search_rect(view, state, width);
-    display__fill_round_rect(box.x, box.y, box.w, box.h, box.h / 2, HUD_PANEL);
+    display__fill_round_rect(box.x, box.y, box.w, box.h, box.h / 2, s_panel);
     int icon_x = box.x + HUD_PAD + 1;
     hud__icon("magnify", icon_x, box.y + (box.h - hud__icon_size()) / 2, hud__icon_size(), HUD_TEXT);
     int text_x = icon_x + hud__icon_size() + HUD_GAP;
     char text[64];
     if (state->place != NULL) hud__fit_name(state->place, box.x + box.w - HUD_PAD - text_x, text, sizeof(text));
-    display__set_text_color(state->place != NULL ? HUD_TEXT : HUD_MUTED);
+    display__set_text_color(state->place != NULL ? HUD_TEXT : s_muted);
     display__draw_string(state->place != NULL ? text : "Search", text_x, box.y + HUD_PAD);
 }
 
@@ -368,16 +373,23 @@ static void hud__draw_scale(const map_view_t *view, int height) {
 
     int x = HUD_MARGIN;
     int y = height - HUD_MARGIN - s_char_h - 6;
-    display__set_text_color(HUD_INK);
+    display__set_text_color(s_ink);
     display__draw_string(label, x, y);
     display__fill_rect(x, y + s_char_h + 2, bar + 2, 4, BRUCE_COLOR_WHITE);
-    display__fill_rect(x + 1, y + s_char_h + 3, bar, 2, HUD_INK);
+    display__fill_rect(x + 1, y + s_char_h + 3, bar, 2, s_ink);
 }
 
+/* On e-paper black on white, so it shows over the outlined map. */
 static void hud__draw_attribution(int width, int height) {
     const char *text = "(c) OpenStreetMap";
-    display__set_text_color(HUD_MUTED);
-    display__draw_string(text, width - HUD_MARGIN - hud__text_width(text), height - HUD_MARGIN - s_char_h);
+    int x = width - HUD_MARGIN - hud__text_width(text), y = height - HUD_MARGIN - s_char_h;
+    if (display__is_epaper()) {
+        display__fill_rect(x - 2, y - 1, hud__text_width(text) + 4, s_char_h + 2, BRUCE_COLOR_WHITE);
+        display__set_text_color(BRUCE_COLOR_BLACK);
+    } else {
+        display__set_text_color(s_muted);
+    }
+    display__draw_string(text, x, y);
 }
 
 /* My location sits in the bottom right corner; +/- are centred on the right edge, above it when short. */
@@ -405,13 +417,13 @@ static void hud__draw_button(hud_button_t button, const char *icon, bruce_displa
                              int height) {
     const int inset = (HUD_BUTTON_SIZE - HUD_BUTTON_ICON) / 2;
     hud_rect_t rect = hud__button_rect(button, width, height);
-    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
+    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, s_panel);
     hud__icon(icon, rect.x + inset, rect.y + inset, HUD_BUTTON_ICON, color);
 }
 
 static void hud__draw_menu_button(int width, int height) {
     hud_rect_t rect = hud__button_rect(HUD_BUTTON_MENU, width, height);
-    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
+    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, s_panel);
     for (int i = -1; i <= 1; ++i) {
         display__fill_circle((int16_t)(rect.x + rect.w / 2 + i * 7), (int16_t)(rect.y + rect.h / 2), 2, HUD_TEXT);
     }
@@ -420,7 +432,7 @@ static void hud__draw_menu_button(int width, int height) {
 /* Filled while there is a fix, orange while the map follows it. */
 static void hud__draw_locate(const hud_state_t *state, int width, int height) {
     const char *icon = state->me ? "crosshairs-gps" : "crosshairs";
-    bruce_display_color_t color = state->following ? HUD_ACCENT : state->me ? HUD_TEXT : HUD_MUTED;
+    bruce_display_color_t color = state->following ? HUD_ACCENT : state->me ? HUD_TEXT : s_muted;
     hud__draw_button(HUD_BUTTON_LOCATE, icon, color, width, height);
 }
 
@@ -435,12 +447,12 @@ static void hud__draw_speed(int speed_kmh, int height) {
     int h = 3 * s_char_h + 2 * HUD_PAD;
     int x = HUD_MARGIN;
     int y = height - HUD_MARGIN - s_char_h - 8 - h;
-    display__fill_round_rect(x, y, w, h, 6, HUD_PANEL);
+    display__fill_round_rect(x, y, w, h, 6, s_panel);
     display__set_text_color(HUD_TEXT);
     display__set_text_size(2);
     display__draw_string(number, x + (w - number_w) / 2, y + HUD_PAD);
     display__set_text_size(1);
-    display__set_text_color(HUD_MUTED);
+    display__set_text_color(s_muted);
     display__draw_string(unit, x + (w - unit_w) / 2, y + HUD_PAD + 2 * s_char_h);
 }
 
@@ -451,7 +463,7 @@ static void hud__draw_hint(const char *const hint[2], const char *icon, int widt
     for (int i = 0; i < lines; ++i) {
         const char *line_icon = i == 0 ? icon : NULL;
         int x = (width - hud__pill_width(hint[i], line_icon)) / 2;
-        hud__pill(hint[i], line_icon, x, y, i == 0 ? HUD_TEXT : HUD_MUTED);
+        hud__pill(hint[i], line_icon, x, y, i == 0 ? HUD_TEXT : s_muted);
         y += hud__pill_height() + 2;
     }
 }
@@ -460,6 +472,10 @@ void hud__draw(const map_view_t *view, const hud_state_t *state, int width, int 
     display__set_text_size(1);
     display__get_font_metrics(&s_char_w, &s_char_h);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    bool epaper = display__is_epaper();
+    s_panel = epaper ? BRUCE_COLOR_BLACK : HUD_GREY_PANEL;
+    s_muted = epaper ? BRUCE_COLOR_WHITE : HUD_GREY_MUTED;
+    s_ink = epaper ? BRUCE_COLOR_BLACK : HUD_GREY_INK;
 
     if (state->route != NULL) hud__draw_route(view, state->route, width, height);
     if (state->pin) hud__draw_pin(view, state->pin_lat, state->pin_lon, width, height);

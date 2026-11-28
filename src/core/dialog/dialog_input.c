@@ -193,6 +193,7 @@ typedef struct {
     const dialog__key_t *keys;
     int rows, cols, sel_row, sel_col;
     bool caps, diacritics, mask_input;
+    bool keys_shown; /* Not with a real keyboard: it types, Enter confirms, Esc cancels. */
     char *buffer;
     size_t buffer_size, len, max_len, cursor;
     const char *title, *prompt;
@@ -514,6 +515,12 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
         DIALOG__CHAR_H * input_text_size - 2,
         dialog__input_text_color()
     );
+    if (!st->keys_shown) {
+        display__set_text_size(DIALOG__TEXT_SIZE);
+        display__set_cursor(DIALOG__MARGIN, layout.textbox_y + layout.textbox_h + 4);
+        display__print("Enter: OK   Esc: cancel");
+        return display__present();
+    }
     uint16_t bg = dialog__input_background_color();
     for (int row = 0; row < st->rows; ++row)
         for (int col = 0; col < st->cols; ++col)
@@ -560,6 +567,7 @@ bruce_result_t dialog__input_gui_run(
         .buffer_size = buffer_size,
         .max_len = buffer_size > 0 ? buffer_size - 1 : 0,
         .mask_input = mask_input,
+        .keys_shown = !input__has_keyboard(),
         .title = title,
         .prompt = prompt
     };
@@ -612,6 +620,20 @@ bruce_result_t dialog__input_gui_run(
                 full_redraw = true;
             }
             continue;
+        }
+
+        /* No keys on screen: arrows move the cursor, Select confirms. */
+        if (!st.keys_shown) {
+            if (ev.code == BRUCE_INPUT_CODE_LEFT || ev.code == BRUCE_INPUT_CODE_RIGHT) {
+                dialog__key_move_cursor(&st, ev.code == BRUCE_INPUT_CODE_LEFT ? -1 : 1);
+                full_redraw = true;
+                continue;
+            }
+            if (ev.code == BRUCE_INPUT_CODE_SELECT || ev.code == BRUCE_INPUT_CODE_BUTTON_A) return BRUCE_OK;
+            if (ev.code == BRUCE_INPUT_CODE_UP || ev.code == BRUCE_INPUT_CODE_DOWN ||
+                ev.code == BRUCE_INPUT_CODE_PREV || ev.code == BRUCE_INPUT_CODE_NEXT) {
+                continue;
+            }
         }
 
         switch (ev.code) {

@@ -42,6 +42,8 @@ typedef struct {
     hud_state_t hud;
     uint64_t hint_until_ms;
     search_t search;
+    search_place_t history[SEARCH_RESULTS_MAX]; /* The latest first. */
+    size_t history_count;
     char place[SEARCH_NAME_MAX];
     bool running;
     bool dirty;
@@ -172,8 +174,24 @@ static double maps__distance_m(const maps_t *app, const search_place_t *place) {
 static void maps__directions_from(maps_t *app);
 static void maps__directions_mode(maps_t *app);
 
+/* To the front of the history, once. */
+static void maps__remember(maps_t *app, double lat, double lon, const char *name) {
+    search_place_t place = {.lat = lat, .lon = lon};
+    snprintf(place.name, sizeof(place.name), "%s", name);
+    size_t count = app->history_count, at = 0;
+    while (at < count && strcmp(app->history[at].name, place.name) != 0) ++at;
+    if (at == count && count < SEARCH_RESULTS_MAX) count++;
+    if (at == SEARCH_RESULTS_MAX) at--;
+    memmove(&app->history[1], &app->history[0], at * sizeof(app->history[0]));
+    app->history[0] = place;
+    app->history_count = count;
+    settings__save_history(app->history, count);
+}
+
 /* A place from search: shown with a pin, or an end of the route being planned. */
 static void maps__place_found(maps_t *app, double lat, double lon, const char *name) {
+    maps__remember(app, lat, lon, name);
+    name = app->history[0].name; /* The caller's may have moved. */
     if (app->finding == MAPS_FIND_DESTINATION) {
         app->to_lat = lat;
         app->to_lon = lon;
@@ -219,11 +237,29 @@ static void maps__search_finished(maps_t *app, bruce_result_t result, const sear
     }
 }
 
+/* The history, under New search; false when New search is picked. */
+static bool maps__pick_history(maps_t *app, const char *title) {
+    bruce_dialog_choice_t choices[SEARCH_RESULTS_MAX + 1] = {{.label = "New search", .icon_name = "magnify"}};
+    char distances[SEARCH_RESULTS_MAX][12];
+    for (size_t i = 0; i < app->history_count; ++i) {
+        route__format_distance(distances[i], sizeof(distances[i]), maps__distance_m(app, &app->history[i]));
+        choices[i + 1] = (bruce_dialog_choice_t){
+            .label = app->history[i].name, .icon_name = "history", .right_text = distances[i]};
+    }
+    size_t selected = 0;
+    if (dialog__choice(title, NULL, choices, app->history_count + 1, &selected) != BRUCE_OK) return true;
+    if (selected == 0) return false;
+    search_place_t place = app->history[selected - 1];
+    maps__place_found(app, place.lat, place.lon, place.name);
+    return true;
+}
+
 /* Coordinates jump straight there; anything else asks the search server. */
 static void maps__search_for(maps_t *app, int finding, const char *title) {
     char text[SEARCH_QUERY_MAX] = {0};
     app->dirty = true;
     app->finding = finding;
+    if (app->history_count > 0 && maps__pick_history(app, title)) return;
     if (dialog__text_input(title, "place or lat, lon", NULL, false, text, sizeof(text)) != BRUCE_OK) return;
     double lat = 0, lon = 0;
     if (search__parse_coordinates(text, &lat, &lon)) {
@@ -761,7 +797,7 @@ static bool maps__hit_button(hud_button_t button, int32_t x, int32_t y) {
     return maps__hit(hud__button_rect(button, display__width(), display__height()), x, y);
 }
 
-/* Drag pans; the +/- buttons appear with the first touch, so keypad boards never see them. */
+/* Drag pans; the +/- buttons show from the start on touch screens, and with the first touch (a mouse) otherwise. */
 static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
     if (event->action == BRUCE_INPUT_PRESS) {
         app->dirty |= !app->hud.zoom_buttons;
@@ -964,6 +1000,8 @@ int app_main(int argc, char **argv) {
     app->gps_available = gps__is_available();
     app->hud.locate_button = app->gps_available && input__has_touch();
     app->hud.menu_button = input__has_touch();
+    app->hud.zoom_buttons = input__has_touch();
+    app->history_count = settings__load_history(app->history, SEARCH_RESULTS_MAX);
     int screen_width = display__screen_width();
     int screen_height = display__screen_height();
     int screen = screen_width > screen_height ? screen_width : screen_height;

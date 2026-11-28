@@ -8574,6 +8574,10 @@ bruce_result_t dialog__text_input(
 
 Text input dialog accepting printable ASCII characters and space.
 
+On devices with a keyboard there is no on-screen keyboard: keys type,
+Enter or Select confirms, Esc cancels (as in dialog__hex_input() and
+dialog__number_input()).
+
 Fills the caller-owned buffer with the entered string (NUL-terminated,
 truncated to buffer_size - 1), and returns BRUCE_OK or
 BRUCE_ERR_CANCELLED.

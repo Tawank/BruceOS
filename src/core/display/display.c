@@ -605,6 +605,12 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
 void display_internal__epd_pull(bool all) {
     display__lock();
     bruce_display_rect_t rect = all ? (bruce_display_rect_t){0, 0, s_fb_width, s_fb_height} : s_epd_dirty;
+    /* Half drawn: the frame's present notifies the panel task again. */
+    if (display__frame_conflicts_locked(rect)) {
+        s_epd_dirty = rect;
+        display__unlock();
+        return;
+    }
     s_epd_dirty = (bruce_display_rect_t){0};
     if (s_initialized && s_buffered_rendering && rect.width > 0 && rect.height > 0) {
         bool fullscreen = rect.x == 0 && rect.y == 0 && rect.width == s_fb_width && rect.height == s_fb_height;

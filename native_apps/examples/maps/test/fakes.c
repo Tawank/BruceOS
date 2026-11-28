@@ -165,8 +165,10 @@ bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bi
     return BRUCE_OK;
 }
 
+static bruce_display_color_t s_text_color;
+
 bruce_result_t display__draw_string(const char *text, int16_t x, int16_t y) {
-    fake_draw_t *draw = fakes__record(FAKE_STRING, x, y, 0, 0, 0);
+    fake_draw_t *draw = fakes__record(FAKE_STRING, x, y, 0, 0, s_text_color);
     if (draw != NULL) snprintf(draw->text, sizeof(draw->text), "%s", text);
     return BRUCE_OK;
 }
@@ -211,7 +213,7 @@ bruce_result_t display__fill_triangle(
 }
 
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
-    (void)color;
+    s_text_color = color;
     return BRUCE_OK;
 }
 
@@ -436,6 +438,40 @@ bool app_config__get_string(
     const char *value = fakes__config_get(json_path);
     snprintf(out_value, capacity, "%s", value != NULL ? value : default_value);
     return value != NULL;
+}
+
+/* Each entry under "<path>.<i>", the count under "<path>.n". */
+size_t app_config__get_string_array(
+    const char *app_name, const char *json_path, char *const *out_values, size_t value_size, size_t capacity
+) {
+    (void)app_name;
+    char key[40];
+    snprintf(key, sizeof(key), "%s.n", json_path);
+    const char *n = fakes__config_get(key);
+    size_t count = n != NULL ? (size_t)atoi(n) : 0;
+    if (count > capacity) count = capacity;
+    for (size_t i = 0; i < count; ++i) {
+        snprintf(key, sizeof(key), "%s.%zu", json_path, i);
+        const char *value = fakes__config_get(key);
+        snprintf(out_values[i], value_size, "%s", value != NULL ? value : "");
+    }
+    return count;
+}
+
+bruce_result_t app_config__set_string_array(
+    const char *app_name, const char *json_path, const char *const *values, size_t count
+) {
+    (void)app_name;
+    char key[40], n[8];
+    for (size_t i = 0; i < count; ++i) {
+        snprintf(key, sizeof(key), "%s.%zu", json_path, i);
+        fakes__config_set(key, values[i]);
+    }
+    snprintf(key, sizeof(key), "%s.n", json_path);
+    snprintf(n, sizeof(n), "%zu", count);
+    fakes__config_set(key, n);
+    fakes.config_writes++;
+    return BRUCE_OK;
 }
 
 /* ---- input, dialogs, runtime -------------------------------------------- */

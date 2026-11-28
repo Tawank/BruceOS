@@ -311,6 +311,48 @@ static void back_cancels_search_not_app(void) {
     stop();
 }
 
+static void search_history_lists_found_places_latest_first(void) {
+    start();
+    fakes.text_input = "1, 2";
+    maps__search(&app);
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 0; /* New search. */
+    fakes.text_input = "3, 4";
+    maps__search(&app);
+    CHECK_EQ(fakes.choice_count, 2u);
+    CHECK_STR(fakes.choice_labels[0], "New search");
+    CHECK_STR(fakes.choice_labels[1], "1 2");
+    CHECK_STR(fakes.choice_icons[1], "history");
+    fakes.choice = 2; /* "1 2" again: no new search, and it moves to the front. */
+    fakes.text_input = NULL;
+    maps__search(&app);
+    CHECK_NEAR(app.hud.pin_lat, 1, 1e-9);
+    CHECK_STR(app.hud.place, "1 2");
+    CHECK_EQ(app.history_count, 2u);
+    search_place_t saved[SEARCH_RESULTS_MAX];
+    CHECK_EQ(settings__load_history(saved, SEARCH_RESULTS_MAX), 2u);
+    CHECK_STR(saved[0].name, "1 2");
+    CHECK_STR(saved[1].name, "3 4");
+    CHECK_NEAR(saved[1].lon, 4, 1e-6);
+    stop();
+}
+
+static void search_history_keeps_the_latest_eight(void) {
+    start();
+    char text[16];
+    for (int i = 0; i < SEARCH_RESULTS_MAX + 2; ++i) {
+        fakes.choice_result = BRUCE_OK;
+        fakes.choice = 0;
+        snprintf(text, sizeof(text), "%d, 0", i);
+        fakes.text_input = text;
+        maps__search(&app);
+    }
+    CHECK_EQ(app.history_count, (size_t)SEARCH_RESULTS_MAX);
+    CHECK_STR(app.history[0].name, "9 0");
+    CHECK_STR(app.history[SEARCH_RESULTS_MAX - 1].name, "2 0");
+    stop();
+}
+
 static void menu_offers_clear_pin_with_a_pin(void) {
     start();
     maps__show_place(&app, 50, 20, "Here");
@@ -885,6 +927,8 @@ SUITE(maps_tests,
       TEST(back_cancels_search_not_app),
       TEST(menu_offers_clear_pin_with_a_pin),
       TEST(coordinates_name_the_pin),
+      TEST(search_history_lists_found_places_latest_first),
+      TEST(search_history_keeps_the_latest_eight),
       TEST(tapping_search_box_opens_search),
       TEST(menu_toggles_online_and_saves),
       TEST(menu_toggles_big_and_saves),

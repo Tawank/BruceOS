@@ -31,8 +31,9 @@ Prev/Next do: zoom, then up/down, then left/right. A short hint on the map
 confirms the new mode, e.g. "Move up/down", and the zoom badge shows an
 arrow icon while Prev/Next pan. The menu also has *Search*, *Directions*,
 *All directions* and *End route* (while there is a route), *Clear pin*
-(while a pin is shown), *Online tiles* on/off, *Exit* and *Back*. On touch
-screens the +/- buttons appear after the first touch.
+(while a pin is shown), *Online tiles* on/off, *Exit* and *Back*. Touch
+screens show +/- buttons from the start; elsewhere they appear with the
+first touch (a mouse).
 
 ## 3D view
 
@@ -72,6 +73,11 @@ screen. The map stays usable while it runs; Back cancels it. Pick one of the
 results (the distance from the screen centre is on the right) and the map
 jumps there and drops a pin. Typing coordinates such as `50.0614, 19.9372`
 jumps straight there without the network.
+
+The last 8 places found are kept (`search.history` in the app's settings,
+the latest first). With any kept, Search lists them under *New search*:
+picking one goes there without searching again. *To* and *From* in
+Directions offer them too.
 
 ## Directions
 
@@ -122,7 +128,9 @@ On e-paper each tile is turned into black and white as it loads
 speckles: text, railways and road casings are black, roads are outlined
 (except around labels, whose white halos would otherwise look like roads),
 water is dotted, and everything else is white. The tiles on the SD card
-stay in colour.
+stay in colour. The buttons and labels are black with white text there,
+since their grey would dither into dots, and the OpenStreetMap credit is
+black on white.
 
 ## Settings
 

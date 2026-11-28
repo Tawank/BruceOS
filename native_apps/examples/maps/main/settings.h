@@ -1,7 +1,10 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include "search.h"
 
 typedef struct {
     int32_t lat_e6;
@@ -21,3 +24,7 @@ void settings__save_view(const settings_t *settings);
 void settings__save_online(bool online);
 void settings__save_big(bool big);
 void settings__save_3d(bool on);
+
+/* Places found by search, the latest first. */
+size_t settings__load_history(search_place_t *places, size_t max);
+void settings__save_history(const search_place_t *places, size_t count);

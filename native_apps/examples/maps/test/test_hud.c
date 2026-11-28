@@ -272,7 +272,27 @@ static void banner_replaces_search_and_route_is_drawn(void) {
     route__free(&route);
 }
 
+/* Grey would dither into dots. */
+static void epaper_panels_are_black(void) {
+    fakes.epaper = true;
+    draw(0, 0, 7, (hud_state_t){.zoom_buttons = true}, 240, 135);
+    size_t panels = 0;
+    for (size_t i = 0; i < fakes.draw_count; ++i) {
+        if (fakes.draws[i].kind != FAKE_ROUND_RECT) continue;
+        panels++;
+        CHECK_EQ(fakes.draws[i].color, BRUCE_COLOR_BLACK);
+    }
+    CHECK(panels >= 4u);
+    const fake_draw_t *credit = fakes__find_string("(c) OpenStreetMap");
+    CHECK(credit != NULL && credit->color == BRUCE_COLOR_BLACK);
+    fakes.epaper = false;
+    fakes__reset();
+    draw(0, 0, 7, (hud_state_t){0}, 240, 135);
+    CHECK(fakes__count(FAKE_ROUND_RECT) > 0 && fakes.draws[0].color != BRUCE_COLOR_BLACK);
+}
+
 SUITE(hud_tests,
+      TEST(epaper_panels_are_black),
       TEST(shows_centre_coordinates),
       TEST(negative_coordinates_keep_sign),
       TEST(shows_zoom_and_nav_mode_icon),

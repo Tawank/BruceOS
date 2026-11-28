@@ -2961,6 +2961,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(log10f),
     ESP_ELFSYM_EXPORT(round),
     ESP_ELFSYM_EXPORT(roundf),
+    ESP_ELFSYM_EXPORT(lround),
+    ESP_ELFSYM_EXPORT(lroundf),
     ESP_ELFSYM_EXPORT(trunc),
     ESP_ELFSYM_EXPORT(truncf),
     ESP_ELFSYM_EXPORT(hypot),
