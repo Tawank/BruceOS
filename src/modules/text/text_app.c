@@ -27,7 +27,9 @@
 #define TEXT_CHAR_HEIGHT 10
 #define TEXT_TITLE_HEIGHT 12
 #define TEXT_FOOTER_HEIGHT 20
+#define TEXT_BAR_HEIGHT 24
 #define TEXT_FRAME_MARGIN 2
+#define TEXT_TAP_PX 8
 
 typedef struct {
     char *data;
@@ -40,7 +42,49 @@ typedef struct {
     bool dirty;
     bool read_only;
     bool selection_active;
+    /* The finger on the touch screen: where it went down, and how many
+     * lines its drag has scrolled so far. */
+    int16_t touch_x;
+    int16_t touch_y;
+    int16_t touch_lines;
+    bool touch_down;
+    bool touch_moved;
 } text_editor_t;
+
+typedef enum {
+    TEXT_BUTTON_TYPE,
+    TEXT_BUTTON_SAVE,
+    TEXT_BUTTON_PASTE,
+    TEXT_BUTTON_COPY,
+    TEXT_BUTTON_MENU,
+    TEXT_BUTTON_CANCEL,
+    TEXT_BUTTON_MAX,
+} text_button_t;
+
+static const char *const TEXT_BUTTON_LABELS[TEXT_BUTTON_MAX] = {"Type", "Save", "Paste", "Copy", "Menu", "Cancel"};
+
+/* The touch screen's bottom bar. Without a keyboard, Type adds text. */
+static size_t text__buttons(const text_editor_t *editor, text_button_t out[TEXT_BUTTON_MAX]) {
+    size_t count = 0;
+    if (editor->selection_active) {
+        out[count++] = TEXT_BUTTON_COPY;
+        out[count++] = TEXT_BUTTON_CANCEL;
+        return count;
+    }
+    if (!editor->read_only && !input__has_keyboard()) out[count++] = TEXT_BUTTON_TYPE;
+    if (!editor->read_only) out[count++] = TEXT_BUTTON_SAVE;
+    if (!editor->read_only) out[count++] = TEXT_BUTTON_PASTE;
+    out[count++] = TEXT_BUTTON_COPY;
+    out[count++] = TEXT_BUTTON_MENU;
+    return count;
+}
+
+static int text__footer_height(void) { return input__has_touch() ? TEXT_BAR_HEIGHT : TEXT_FOOTER_HEIGHT; }
+
+static size_t text__visible_lines(void) {
+    int lines = (display__height() - TEXT_TITLE_HEIGHT - text__footer_height()) / TEXT_CHAR_HEIGHT;
+    return lines > 0 ? (size_t)lines : 1u;
+}
 
 static bruce_result_t text__reserve(text_editor_t *editor, size_t required);
 
@@ -251,13 +295,13 @@ static void text__move_vertical(text_editor_t *editor, int direction) {
 static void text__render(const char *path, text_editor_t *editor) {
     int width = display__width();
     int height = display__height();
-    if (width <= 0 || height <= TEXT_TITLE_HEIGHT + TEXT_FOOTER_HEIGHT) return;
+    int footer_height = text__footer_height();
+    if (width <= 0 || height <= TEXT_TITLE_HEIGHT + footer_height) return;
     uint16_t foreground = config__get_color_primary();
     uint16_t background = config__get_color_background();
     size_t visible_columns = (size_t)(width - 2 * TEXT_FRAME_MARGIN) / TEXT_CHAR_WIDTH;
-    size_t visible_lines = (size_t)(height - TEXT_TITLE_HEIGHT - TEXT_FOOTER_HEIGHT) / TEXT_CHAR_HEIGHT;
+    size_t visible_lines = text__visible_lines();
     if (visible_columns == 0) visible_columns = 1;
-    if (visible_lines == 0) visible_lines = 1;
 
     size_t cursor_line;
     size_t cursor_column;
@@ -381,6 +425,39 @@ static void text__render(const char *path, text_editor_t *editor) {
     snprintf(
         status, sizeof(status), "Ln %u Col %u", (unsigned)(cursor_line + 1u), (unsigned)(cursor_column + 1u)
     );
+    if (input__has_touch()) {
+        /* The bar replaces the footer; the title shows where the cursor is. */
+        const char *right = editor->selection_active ? "Tap the end, then Copy" : status;
+        (void)display__fill_rect(
+            (int16_t)(width - (int)strlen(right) * TEXT_CHAR_WIDTH - 2 * TEXT_FRAME_MARGIN), 0,
+            (int16_t)((int)strlen(right) * TEXT_CHAR_WIDTH + 2 * TEXT_FRAME_MARGIN), TEXT_TITLE_HEIGHT, foreground
+        );
+        (void)display__set_text_color(background);
+        (void)display__set_cursor(
+            (int16_t)(width - (int)strlen(right) * TEXT_CHAR_WIDTH - TEXT_FRAME_MARGIN), TEXT_FRAME_MARGIN
+        );
+        (void)display__print(right);
+
+        text_button_t buttons[TEXT_BUTTON_MAX];
+        size_t count = text__buttons(editor, buttons);
+        int y = height - TEXT_BAR_HEIGHT;
+        (void)display__fill_rect(0, (int16_t)y, (int16_t)width, TEXT_BAR_HEIGHT, background);
+        for (size_t i = 0; i < count; ++i) {
+            int x = width * (int)i / (int)count;
+            int w = width * (int)(i + 1u) / (int)count - x;
+            const char *label = TEXT_BUTTON_LABELS[buttons[i]];
+            (void)display__fill_rect(
+                (int16_t)(x + 1), (int16_t)(y + 2), (int16_t)(w - 2), TEXT_BAR_HEIGHT - 2, foreground
+            );
+            (void)display__set_cursor(
+                (int16_t)(x + (w - (int)strlen(label) * TEXT_CHAR_WIDTH) / 2),
+                (int16_t)(y + 2 + (TEXT_BAR_HEIGHT - 2 - TEXT_CHAR_HEIGHT) / 2)
+            );
+            (void)display__print(label);
+        }
+        (void)display__present();
+        return;
+    }
     (void)display__draw_line(
         0,
         (int16_t)(height - TEXT_FOOTER_HEIGHT),
@@ -518,29 +595,157 @@ static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t 
     return text__exit_prompt(path, path_size, editor, out_exit);
 }
 
+static size_t text__line_position(const text_editor_t *editor, size_t line) {
+    size_t position = 0;
+    while (line > 0 && position < editor->length) {
+        if (editor->data[position++] == '\n') line--;
+    }
+    return position;
+}
+
+static size_t text__line_count(const text_editor_t *editor) {
+    size_t count = 1;
+    for (size_t i = 0; i < editor->length; ++i) count += editor->data[i] == '\n';
+    return count;
+}
+
+/* Moves the cursor to `column` of `line`, or the line's end. */
+static void text__move_to(text_editor_t *editor, size_t line, size_t column) {
+    size_t start = text__line_position(editor, line);
+    editor->cursor = text__column_to_byte(editor, start, text__line_end(editor, start), column);
+}
+
+/* Scrolls the view by `lines`, taking the cursor along when it would leave it. */
+static void text__scroll(text_editor_t *editor, int lines) {
+    size_t visible = text__visible_lines();
+    size_t total = text__line_count(editor);
+    size_t max_top = total > visible ? total - visible : 0;
+    long top = (long)editor->top_line + lines;
+    if (top < 0) top = 0;
+    if ((size_t)top > max_top) top = (long)max_top;
+    editor->top_line = (size_t)top;
+    size_t line, column;
+    text__cursor_location(editor, &line, &column);
+    if (line < editor->top_line) text__move_to(editor, editor->top_line, column);
+    if (line >= editor->top_line + visible) text__move_to(editor, editor->top_line + visible - 1u, column);
+}
+
+static bruce_result_t text__type(text_editor_t *editor) {
+    char *typed = memory__malloc(TEXT_LINE_INPUT_MAX);
+    if (typed == NULL) return BRUCE_ERR_NO_MEMORY;
+    bruce_result_t result = dialog__text_input("Text editor", "Add text", NULL, false, typed, TEXT_LINE_INPUT_MAX);
+    if (result == BRUCE_OK) result = text__replace(editor, editor->cursor, editor->cursor, typed, strlen(typed));
+    memory__free(typed);
+    return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+}
+
+static bruce_result_t text__save_now(char *path, size_t path_size, text_editor_t *editor) {
+    if (editor->read_only) return BRUCE_OK;
+    bruce_result_t result = text__save_to_path(path, path_size, editor);
+    if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) (void)text__show_error("Save", result);
+    return BRUCE_OK;
+}
+
+static bruce_result_t
+text__press_button(char *path, size_t path_size, text_editor_t *editor, text_button_t button, bool *out_exit) {
+    switch (button) {
+        case TEXT_BUTTON_TYPE: return text__type(editor);
+        case TEXT_BUTTON_SAVE: return text__save_now(path, path_size, editor);
+        case TEXT_BUTTON_PASTE: return text__paste(editor);
+        case TEXT_BUTTON_COPY:
+            if (editor->selection_active) {
+                editor->selection_active = false;
+                return text__copy_selection(editor);
+            }
+            editor->selection_anchor = editor->cursor;
+            editor->selection_active = true;
+            return BRUCE_OK;
+        case TEXT_BUTTON_CANCEL: editor->selection_active = false; return BRUCE_OK;
+        case TEXT_BUTTON_MENU: return text__actions(path, path_size, editor, out_exit);
+        default: return BRUCE_OK;
+    }
+}
+
+/* A drag scrolls the text, a tap puts the cursor there, and the bar's
+ * buttons act when released over the one pressed. Sets `out_changed` when
+ * the screen needs drawing again. */
+static bruce_result_t text__touch(
+    char *path, size_t path_size, text_editor_t *editor, const bruce_input_event_t *event, bool *out_exit,
+    bool *out_changed
+) {
+    int bar_y = display__height() - TEXT_BAR_HEIGHT;
+    *out_changed = false;
+    if (event->action == BRUCE_INPUT_PRESS) {
+        editor->touch_x = event->x;
+        editor->touch_y = event->y;
+        editor->touch_lines = 0;
+        editor->touch_down = true;
+        editor->touch_moved = false;
+        return BRUCE_OK;
+    }
+    if (!editor->touch_down) return BRUCE_OK;
+    if (event->action == BRUCE_INPUT_RELEASE) editor->touch_down = false;
+
+    if (editor->touch_y >= bar_y) {
+        if (event->action != BRUCE_INPUT_RELEASE || event->y < bar_y) return BRUCE_OK;
+        text_button_t buttons[TEXT_BUTTON_MAX];
+        size_t count = text__buttons(editor, buttons);
+        int width = display__width();
+        int pressed = editor->touch_x * (int)count / width;
+        if (pressed < 0 || pressed >= (int)count || event->x * (int)count / width != pressed) return BRUCE_OK;
+        *out_changed = true;
+        return text__press_button(path, path_size, editor, buttons[pressed], out_exit);
+    }
+
+    int dy = editor->touch_y - event->y;
+    if (abs(dy) > TEXT_TAP_PX || abs(event->x - editor->touch_x) > TEXT_TAP_PX) editor->touch_moved = true;
+    int lines = dy / TEXT_CHAR_HEIGHT;
+    /* E-paper scrolls once the finger lifts: following it would refresh the
+     * panel over and over while the text keeps moving. */
+    bool follow = event->action == BRUCE_INPUT_RELEASE || !display__is_epaper();
+    if (follow && lines != editor->touch_lines) {
+        text__scroll(editor, lines - editor->touch_lines);
+        editor->touch_lines = (int16_t)lines;
+        *out_changed = true;
+    }
+    if (event->action == BRUCE_INPUT_RELEASE && !editor->touch_moved && event->y >= TEXT_TITLE_HEIGHT) {
+        int column = (event->x - TEXT_FRAME_MARGIN + TEXT_CHAR_WIDTH / 2) / TEXT_CHAR_WIDTH;
+        size_t line = editor->top_line + (size_t)((event->y - TEXT_TITLE_HEIGHT) / TEXT_CHAR_HEIGHT);
+        size_t total = text__line_count(editor);
+        if (line >= total) line = total - 1u;
+        text__move_to(editor, line, editor->left_column + (size_t)(column > 0 ? column : 0));
+        *out_changed = true;
+    }
+    return BRUCE_OK;
+}
+
 static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor_t *editor) {
     (void)input__flush();
+    bool redraw = true;
     for (;;) {
-        text__render(path, editor);
+        if (redraw) text__render(path, editor);
+        redraw = true;
         bruce_input_event_t event;
         bruce_result_t result = input__read(&event, UINT32_MAX);
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
             if (display__await_redraw()) continue;
             return BRUCE_OK;
         }
-        if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
+        bool exit_editor = false;
+        if (result == BRUCE_OK && event.type == BRUCE_INPUT_TOUCH) {
+            result = text__touch(path, path_size, editor, &event, &exit_editor, &redraw);
+            if (result != BRUCE_OK) (void)text__show_error("Edit", result);
+            if (exit_editor) return BRUCE_OK;
+            continue;
+        }
+        if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) {
+            redraw = false;
+            continue;
+        }
 
         bool semantic = event.type != BRUCE_INPUT_KEY || event.value != event.code;
-        bool exit_editor = false;
         if (!editor->selection_active && !semantic && event.code == 0x13) {
-            if (!editor->read_only) {
-                result = text__save_to_path(path, path_size, editor);
-                if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
-                if (result != BRUCE_OK) {
-                    (void)text__show_error("Save", result);
-                    result = BRUCE_OK;
-                }
-            }
+            result = text__save_now(path, path_size, editor);
         } else if (!editor->selection_active && !semantic && event.code == 0x18) {
             result = text__exit_prompt(path, path_size, editor, &exit_editor);
         } else if (!editor->selection_active && !semantic && event.code == 0x03) {
