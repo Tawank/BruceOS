@@ -34,6 +34,7 @@ typedef enum {
     HAL_CLASS_HAPTIC,
     HAL_CLASS_LED,
     HAL_CLASS_CHARGER,
+    HAL_CLASS_RF,
     HAL_CLASS_COUNT,
 } hal_class_t;
 

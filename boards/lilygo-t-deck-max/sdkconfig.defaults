@@ -3,8 +3,8 @@
 #
 # Pins from LilyGO's TDeckMaxBoard.h (github.com/Xinyuan-LilyGO/T-Deck-MAX).
 # The XL9555 expander and what hangs off it (power rails, PWRKEY, audio
-# routing) are HAL devices in board.c. LoRa (SX1262), gyroscope and
-# vibration motor have no driver yet; their power enables are left off.
+# routing) are HAL devices in board.c, as are the SX1262, IMU and
+# vibration motor, powered only while in use.
 CONFIG_IDF_TARGET="esp32s3"
 # HAL devices from boards/lilygo-t-deck-max/board.c, whatever the build dir.
 CONFIG_BRUCE_BOARD_ID="lilygo-t-deck-max"

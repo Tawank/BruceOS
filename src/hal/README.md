@@ -22,7 +22,7 @@ device class at a time.
   `HAL_CLASS_BATTERY` (`hal_battery.h`), `HAL_CLASS_TOUCH` (`hal_touch.h`),
   `HAL_CLASS_KEYPAD` (`hal_keypad.h`), `HAL_CLASS_IMU` (`hal_imu.h`),
   `HAL_CLASS_HAPTIC` (`hal_haptic.h`), `HAL_CLASS_CHARGER` (`hal_charger.h`),
-  `HAL_CLASS_GPIO` (`hal_gpio.h`),
+  `HAL_CLASS_GPIO` (`hal_gpio.h`), `HAL_CLASS_RF` (`hal_rf.h`),
   `HAL_CLASS_RAIL` (`hal_rail.h`). More come with the drivers that need
   them (display, audio codec...).
 - **Pins** (`hal_pin_t`): a controller and a pin number. The controller is
@@ -141,6 +141,16 @@ the SoC pin named `led` with an LEDC timer and channel that board.c gives
 it. Core's `device__set_keyboard_light()` drives the device named
 `keyboard_light`, at its saved level from boot and off while the device
 sleeps.
+
+## Radios
+
+An RF-class driver (`drivers/rf/`: `sx1262.c`, `cc1101.c`) is a sub-GHz
+transceiver on an SPI bus. It gives the bands it tunes and measures the
+signal on a frequency (`hal_rf_rssi()`), between `hal_device_get()` and
+`put()`: `start` powers the chip and sets it up, `stop` puts it to sleep and
+cuts its rail. Apps reach them through Core's `core_sdk/rf.h`, which lets
+one process at a time hold a module. The T-Deck MAX's SX1262 is board.c's
+`lora`, with its TCXO and antenna switch settings in `sx1262_config_t`.
 
 ## Using a device
 

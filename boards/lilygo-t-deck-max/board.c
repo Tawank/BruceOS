@@ -8,6 +8,7 @@
 #include "hal/drivers/imu/bhi260ap.h"
 #include "hal/drivers/keypad/tca8418.h"
 #include "hal/drivers/led/pwm_led.h"
+#include "hal/drivers/rf/sx1262.h"
 #include "hal/drivers/touch/cst3530.h"
 #include "hal/hal.h"
 #include "hal/hal_hog.h"
@@ -15,8 +16,8 @@
 #include "hal/hal_rail.h"
 #include "hal/hal_spi.h"
 
-/* Off the shared SPI bus from boot, as LilyGO's firmware does: LoRa (no
- * driver yet), and the SD card and e-paper until their drivers take over. */
+/* Off the shared SPI bus from boot, as LilyGO's firmware does, until
+ * their drivers take over: LoRa, SD card and e-paper. */
 static const hal_hog_config_t spi2_quiet_config = {.active = false};
 HAL_DEVICE(
     spi2_quiet, .driver = &hal_hog_driver, .config = &spi2_quiet_config,
@@ -96,6 +97,19 @@ HAL_DEVICE(
 HAL_RAIL(motor_power, .enable = HAL_PIN(xl9555, 5));
 HAL_DEVICE(motor, .driver = &drv2605_driver, .bus = &i2c0, .address = 0x5A, HAL_RAILS(&motor_power));
 
+/* SX1262 on spi2, powered by LORA_EN. A 2.4 V TCXO on DIO3 and the
+ * antenna switch on DIO2, as LilyGO's RadioLib setup (setTCXO(2.4)). */
+HAL_RAIL(lora_power, .enable = HAL_PIN(xl9555, 1));
+static const sx1262_config_t lora_config = {.tcxo_code = 0x04, .tcxo_delay_us = 5000, .dio2_rf_switch = true};
+HAL_DEVICE(
+    lora, .driver = &sx1262_driver, .bus = &spi2, .config = &lora_config,
+    HAL_PINS(
+        {"cs", HAL_SOC_PIN_LOW(3)}, {"reset", HAL_SOC_PIN_LOW(4)}, {"busy", HAL_SOC_PIN(6)},
+        {"interrupt", HAL_SOC_PIN(5)}
+    ),
+    HAL_RAILS(&lora_power)
+);
+
 /* No drivers yet: core/gps and core/cellular drive them through these. */
 HAL_DEVICE(gps, HAL_RAILS(&gps_power));
 HAL_DEVICE(
@@ -109,5 +123,6 @@ HAL_DEVICE(
 
 HAL_BOARD(
     "LilyGO T-Deck MAX", &spi2_quiet, &i2c0, &spi2, &sd, &display, &xl9555, &battery, &charger, &touch, &keyboard,
-    &keyboard_light, &modem_power, &gps_power, &imu_power, &imu, &motor_power, &motor, &gps, &modem
+    &keyboard_light, &modem_power, &gps_power, &imu_power, &imu, &motor_power, &motor, &lora_power, &lora, &gps,
+    &modem
 );

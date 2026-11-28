@@ -163,6 +163,7 @@ idf_component_register(SRCS
                     "core/permission/permission.c"
                     "core/pubsub/pubsub.c"
                     "core/result/result.c"
+                    "core/rf/rf.c"
                     "core/stdio/stdio.c"
                      "core/spi/spi.c"
                      "core/ssh/ssh.c"
@@ -214,6 +215,7 @@ idf_component_register(SRCS
                     "hal/hal_keypad.c"
                     "hal/hal_led.c"
                     "hal/hal_rail.c"
+                    "hal/hal_rf.c"
                     "hal/hal_spi.c"
                     "hal/hal_touch.c"
                     "hal/drivers/battery/bq27220.c"
@@ -226,6 +228,8 @@ idf_component_register(SRCS
                     "hal/drivers/imu/bhi260ap.c"
                     "hal/drivers/keypad/tca8418.c"
                     "hal/drivers/led/pwm_led.c"
+                    "hal/drivers/rf/cc1101.c"
+                    "hal/drivers/rf/sx1262.c"
                     "hal/drivers/touch/cst3530.c"
                     "modules/hal/hal_app.c"
                     "modules/clock/clock_app.c"
@@ -306,6 +310,7 @@ idf_component_register(SRCS
                      "modules/ir/ir_app.c"
                      "modules/ir/ir_tvbgone.c"
                     "modules/nrf24/nrf24_app.c"
+                    "modules/rf/rf_app.c"
                     "modules/gps/gps_app.c"
                     "modules/bparted/bparted_app.c"
                     "modules/bparted/bparted_cli.c"
@@ -659,6 +664,11 @@ target_include_directories(bruce_sdk_builtin_nrf24_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nrf24")
 
+add_library(bruce_sdk_builtin_rf_check OBJECT "modules/rf/rf_app.c")
+target_include_directories(bruce_sdk_builtin_rf_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/rf")
+
 add_library(bruce_sdk_builtin_gps_check OBJECT "modules/gps/gps_app.c")
 target_include_directories(bruce_sdk_builtin_gps_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -876,6 +886,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_bluetooth_hid_check
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
+    bruce_sdk_builtin_rf_check
     bruce_sdk_builtin_gps_check
     bruce_sdk_builtin_bparted_check
     bruce_sdk_builtin_browser_check

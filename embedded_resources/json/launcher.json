@@ -29,6 +29,9 @@
     "Radio status": "nrf24 status",
     "Information": "nrf24 info"
   },
+  "RF@antenna": {
+    "Scan": "rf scan"
+  },
   "Files@folder-open": "filemanager",
   "Browser@web": "browser",
   "Terminal@console": "terminal",

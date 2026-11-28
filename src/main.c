@@ -44,6 +44,7 @@
 #include "modules/notification_service/notification_service.h"
 #include "modules/gps/gps_app.h"
 #include "modules/nrf24/nrf24_app.h"
+#include "modules/rf/rf_app.h"
 #include "modules/player/player_app.h"
 #include "modules/privileged/app_settings/app_settings_app.h"
 #if CONFIG_BRUCE_QEMU_TEST_MODE
@@ -149,6 +150,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"input",                "Inspect input devices",                                     "Radio",   input_app_main,               3072,  false},
     {"ir",                   "Control infrared devices",                                  "Radio",   ir_app_main,                  0,     false},
     {"nrf24",                "Control NRF24 radios",                                      "Radio",   nrf24_app_main,               0,     false},
+    {"rf",                   "Scan with sub-GHz radio modules",                           "Radio",   rf_app_main,                  0,     false},
 
     /* Runtime - ELF, JS, and Wasm application loaders. */
     {"elf",                  "Run ELF applications",                                      "Runtime", elf_loader__app_main,         0,     false},

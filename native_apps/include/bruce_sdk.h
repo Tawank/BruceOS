@@ -42,6 +42,7 @@
 #include "core_sdk/net.h"          // IWYU pragma: export
 #include "core_sdk/notification.h" // IWYU pragma: export
 #include "core_sdk/nrf24.h"        // IWYU pragma: export
+#include "core_sdk/rf.h"           // IWYU pragma: export
 #include "core_sdk/partition_manager.h" // IWYU pragma: export
 #include "core_sdk/permission.h"   // IWYU pragma: export
 #include "core_sdk/ssh.h"          // IWYU pragma: export

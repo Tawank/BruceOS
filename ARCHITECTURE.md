@@ -1652,6 +1652,15 @@ Kconfig. The built-in NRF24 app exposes status and passive spectrum scans in
 both launcher GUI and terminal forms. The v1 API intentionally excludes packet
 transmit, MouseJack, and constant-carrier jamming.
 
+`rf` also covers the sub-GHz modules (`core_sdk/rf.h`): HAL devices of class
+`HAL_CLASS_RF` (`src/hal/drivers/rf/`: SX1262, CC1101) that the board
+describes. Any app lists them with `rf__count()`/`rf__info()`; one process at
+a time holds a module between `rf__open()` and `rf__close()`, or its exit,
+which powers it up and down through `hal_device_get()`/`put()`. So far a
+module measures the signal on a frequency (`rf__rssi()`); the built-in `rf`
+app scans common remote frequencies with it. The SX1262 has no OOK
+demodulator or direct receive mode, so recording remotes needs a CC1101.
+
 ## Public SDK and migration rules
 
 Maintain two header layers:

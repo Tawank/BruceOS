@@ -15,6 +15,7 @@
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
+#include "modules/rf/rf_app.h"
 #include "modules/nc/nc_app.h"
 #include "modules/nmap/nmap_app.h"
 #include "modules/utils/man/man_app.h"
@@ -96,6 +97,7 @@ static bool selftest__args_module_help(void) {
         image_app_main,
         js_loader__app_main,
         nrf24_app_main,
+        rf_app_main,
         notify_app_main,
         man_app_main,
         process_app_main,

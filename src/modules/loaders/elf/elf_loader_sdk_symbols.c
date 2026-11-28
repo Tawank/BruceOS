@@ -69,6 +69,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/nrf24.h"
+#include "core_sdk/rf.h"
 #include "core_sdk/partition_manager.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
@@ -2400,6 +2401,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(nrf24__get_channel),
     ESP_ELFSYM_EXPORT(nrf24__scan),
     ESP_ELFSYM_EXPORT(nrf24__get_pins),
+    ESP_ELFSYM_EXPORT(rf__count),
+    ESP_ELFSYM_EXPORT(rf__info),
+    ESP_ELFSYM_EXPORT(rf__open),
+    ESP_ELFSYM_EXPORT(rf__close),
+    ESP_ELFSYM_EXPORT(rf__rssi),
 
     /* GPS */
     ESP_ELFSYM_EXPORT(appdata__get_path),
